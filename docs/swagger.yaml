@@ -1,5 +1,20 @@
 basePath: /api/v1
 definitions:
+  DiskResponse:
+    properties:
+      blockdevices:
+        items:
+          $ref: '#/definitions/internal_domain_model_cube.DiskDevice'
+        type: array
+      raidcontrollers:
+        items:
+          additionalProperties:
+            type: string
+          type: object
+        type: array
+      refresh_time:
+        type: string
+    type: object
   Errorlog:
     properties:
       error:
@@ -45,344 +60,6 @@ definitions:
       refreshTime:
         type: string
     type: object
-  TypeBlockDevice:
-    properties:
-      blockdevices:
-        items:
-          properties:
-            alignment:
-              type: integer
-            children:
-              items:
-                properties:
-                  alignment:
-                    type: integer
-                  children:
-                    items:
-                      properties:
-                        alignment:
-                          type: integer
-                        dax:
-                          type: boolean
-                        disc-aln:
-                          type: integer
-                        disc-gran:
-                          type: string
-                        disc-max:
-                          type: string
-                        disc-zero:
-                          type: boolean
-                        fsavail:
-                          type: string
-                        fsroots:
-                          items:
-                            type: string
-                          type: array
-                        fssize:
-                          type: string
-                        fstype:
-                          type: string
-                        fsuse%:
-                          type: string
-                        fsused:
-                          type: string
-                        fsver:
-                          type: string
-                        group:
-                          type: string
-                        hctl: { }
-                        hotplug:
-                          type: boolean
-                        kname:
-                          type: string
-                        label: { }
-                        log-sec:
-                          type: integer
-                        maj:min:
-                          type: string
-                        min-io:
-                          type: integer
-                        mode:
-                          type: string
-                        model: { }
-                        mountpoint:
-                          type: string
-                        mountpoints:
-                          items:
-                            type: string
-                          type: array
-                        name:
-                          type: string
-                        opt-io:
-                          type: integer
-                        owner:
-                          type: string
-                        partflags: { }
-                        partlabel: { }
-                        parttype: { }
-                        parttypename: { }
-                        partuuid: { }
-                        path:
-                          type: string
-                        phy-sec:
-                          type: integer
-                        pkname:
-                          type: string
-                        pttype:
-                          type: string
-                        ptuuid:
-                          type: string
-                        ra:
-                          type: integer
-                        rand:
-                          type: boolean
-                        rev: { }
-                        rm:
-                          type: boolean
-                        ro:
-                          type: boolean
-                        rota:
-                          type: boolean
-                        rq-size:
-                          type: integer
-                        sched: { }
-                        serial: { }
-                        size:
-                          type: string
-                        state:
-                          type: string
-                        subsystems:
-                          type: string
-                        tran: { }
-                        type:
-                          type: string
-                        uuid:
-                          type: string
-                        vendor: { }
-                        wsame:
-                          type: string
-                        wwn: { }
-                        zoned:
-                          type: string
-                      type: object
-                    type: array
-                  dax:
-                    type: boolean
-                  disc-aln:
-                    type: integer
-                  disc-gran:
-                    type: string
-                  disc-max:
-                    type: string
-                  disc-zero:
-                    type: boolean
-                  fsavail:
-                    type: string
-                  fsroots:
-                    items:
-                      type: string
-                    type: array
-                  fssize:
-                    type: string
-                  fstype:
-                    type: string
-                  fsuse%:
-                    type: string
-                  fsused:
-                    type: string
-                  fsver:
-                    type: string
-                  group:
-                    type: string
-                  hctl: { }
-                  hotplug:
-                    type: boolean
-                  kname:
-                    type: string
-                  label: { }
-                  log-sec:
-                    type: integer
-                  maj:min:
-                    type: string
-                  min-io:
-                    type: integer
-                  mode:
-                    type: string
-                  model: { }
-                  mountpoint:
-                    type: string
-                  mountpoints:
-                    items:
-                      type: string
-                    type: array
-                  name:
-                    type: string
-                  opt-io:
-                    type: integer
-                  owner:
-                    type: string
-                  partflags:
-                    type: string
-                  partlabel: { }
-                  parttype:
-                    type: string
-                  parttypename:
-                    type: string
-                  partuuid:
-                    type: string
-                  path:
-                    type: string
-                  phy-sec:
-                    type: integer
-                  pkname:
-                    type: string
-                  pttype:
-                    type: string
-                  ptuuid:
-                    type: string
-                  ra:
-                    type: integer
-                  rand:
-                    type: boolean
-                  rev: { }
-                  rm:
-                    type: boolean
-                  ro:
-                    type: boolean
-                  rota:
-                    type: boolean
-                  rq-size:
-                    type: integer
-                  sched:
-                    type: string
-                  serial: { }
-                  size:
-                    type: string
-                  state:
-                    type: string
-                  subsystems:
-                    type: string
-                  tran: { }
-                  type:
-                    type: string
-                  uuid:
-                    type: string
-                  vendor: { }
-                  wsame:
-                    type: string
-                  wwn:
-                    type: string
-                  zoned:
-                    type: string
-                type: object
-              type: array
-            dax:
-              type: boolean
-            disc-aln:
-              type: integer
-            disc-gran:
-              type: string
-            disc-max:
-              type: string
-            disc-zero:
-              type: boolean
-            fsavail: { }
-            fsroots:
-              items: { }
-              type: array
-            fssize: { }
-            fstype:
-              type: string
-            fsuse%: { }
-            fsused: { }
-            fsver:
-              type: string
-            group:
-              type: string
-            hctl:
-              type: string
-            hotplug:
-              type: boolean
-            kname:
-              type: string
-            label: { }
-            log-sec:
-              type: integer
-            maj:min:
-              type: string
-            min-io:
-              type: integer
-            mode:
-              type: string
-            model:
-              type: string
-            mountpoint: { }
-            mountpoints:
-              items: { }
-              type: array
-            name:
-              type: string
-            opt-io:
-              type: integer
-            owner:
-              type: string
-            partflags: { }
-            partlabel: { }
-            parttype: { }
-            parttypename: { }
-            partuuid: { }
-            path:
-              type: string
-            phy-sec:
-              type: integer
-            pkname: { }
-            pttype:
-              type: string
-            ptuuid:
-              type: string
-            ra:
-              type: integer
-            rand:
-              type: boolean
-            rev:
-              type: string
-            rm:
-              type: boolean
-            ro:
-              type: boolean
-            rota:
-              type: boolean
-            rq-size:
-              type: integer
-            sched:
-              type: string
-            serial:
-              type: string
-            size:
-              type: string
-            state:
-              type: string
-            subsystems:
-              type: string
-            tran:
-              type: string
-            type:
-              type: string
-            uuid:
-              type: string
-            vendor:
-              type: string
-            wsame:
-              type: string
-            wwn:
-              type: string
-            zoned:
-              type: string
-          type: object
-        type: array
-      refreshTime:
-        type: string
-    type: object
   TypeGlueStatus:
     description: Glue의 상태를 나타내는 구조체
     properties:
@@ -398,7 +75,7 @@ definitions:
       fsmap:
         properties:
           by_rank:
-            items: { }
+            items: {}
             type: array
           epoch:
             type: integer
@@ -977,13 +654,13 @@ definitions:
     properties:
       pools:
         items:
-          $ref: '#/definitions/model.TypeGluePools'
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePools'
         type: array
       stats:
-        $ref: '#/definitions/model.TypeGlueStorageStats'
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueStorageStats'
       stats_by_class:
         items:
-          $ref: '#/definitions/model.TypeGlueClass'
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueClass'
         type: array
     type: object
   TypeMoldStatus:
@@ -1001,7 +678,7 @@ definitions:
       fsmap:
         properties:
           by_rank:
-            items: { }
+            items: {}
             type: array
           epoch:
             type: integer
@@ -1010,8 +687,8 @@ definitions:
         type: object
       health:
         properties:
-          checks: { }
-          mutes: { }
+          checks: {}
+          mutes: {}
           status:
             example: HEALTH_WARN
             format: string
@@ -1115,7 +792,7 @@ definitions:
             type: integer
           modified:
             type: string
-          services: { }
+          services: {}
         type: object
     type: object
   TypePCSStatus:
@@ -1241,7 +918,7 @@ definitions:
         properties:
           clone:
             items:
-              $ref: '#/definitions/model.TypePCSClone'
+              $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSClone'
             type: array
           resource:
             description: Text     string            `xml:",chardata"`
@@ -1395,48 +1072,348 @@ definitions:
   TypeStorageCenterCluster:
     properties:
       cluster-status:
-        $ref: '#/definitions/model.TypeClusterStatus'
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeClusterStatus'
       daemons:
-        $ref: '#/definitions/model.TypeGlueDaemons'
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemons'
       disks:
-        $ref: '#/definitions/model.TypeDisks'
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeDisks'
       gateways:
-        $ref: '#/definitions/model.TypeGateways'
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeGateways'
       refresh-time:
         type: string
       storage-pools:
         $ref: '#/definitions/TypeGlueStorageSize'
     type: object
-  controller.TypeNeighbor:
+  github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeClusterStatus:
     properties:
+      message:
+        items:
+          type: string
+        type: array
+      status:
+        type: string
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeDisks:
+    properties:
+      in:
+        type: integer
+      total:
+        type: integer
+      up:
+        type: integer
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeGateways:
+    properties:
+      quorum:
+        items:
+          type: string
+        type: array
+      total:
+        type: integer
+      up:
+        type: integer
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueClass:
+    properties:
+      total_avail_bytes:
+        type: integer
+      total_bytes:
+        type: integer
+      total_used_bytes:
+        type: integer
+      total_used_raw_bytes:
+        type: integer
+      total_used_raw_ratio:
+        type: number
+      type:
+        type: string
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon:
+    properties:
+      container_id:
+        type: string
+      container_image_digests:
+        items:
+          type: string
+        type: array
+      container_image_id:
+        type: string
+      container_image_name:
+        type: string
+      cpu_percentage:
+        type: string
+      created:
+        type: string
+      daemon_id:
+        type: string
+      daemon_name:
+        type: string
+      daemon_type:
+        type: string
+      events:
+        items:
+          type: string
+        type: array
       hostname:
         type: string
-      ip:
+      is_active:
+        type: boolean
+      last_refresh:
+        type: string
+      memory_request:
+        type: integer
+      memory_usage:
+        type: integer
+      ports:
+        items:
+          type: integer
+        type: array
+      service_name:
+        type: string
+      started:
+        type: string
+      status:
+        type: integer
+      status_desc:
+        type: string
+      version:
         type: string
     type: object
-  controller.TypeNeighborInfo:
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemons:
     properties:
-      code:
-        type: integer
-      info:
-        additionalProperties: true
-        type: object
-    type: object
-  controller.TypeNeighborInfos:
-    properties:
-      neighbors:
-        additionalProperties:
-          $ref: '#/definitions/controller.TypeNeighborInfo'
-        type: object
-    type: object
-  controller.TypeNeighbors:
-    properties:
-      neighbors:
+      alertmanager:
         items:
-          $ref: '#/definitions/controller.TypeNeighbor'
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      ceph-exporter:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      crash:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      grafana:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      iscsi:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      mds:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      mgr:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      mon:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      node-exporter:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      osd:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      other:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      prometheus:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      rbd-mirror:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
+        type: array
+      refreshTime:
+        type: string
+      rgw:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon'
         type: array
     type: object
-  model.NICStatus:
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePoolStats:
+    properties:
+      avail_raw:
+        type: integer
+      bytes_used:
+        type: integer
+      compress_bytes_used:
+        type: integer
+      compress_under_bytes:
+        type: integer
+      data_bytes_used:
+        type: integer
+      dirty:
+        type: integer
+      kb_used:
+        type: integer
+      max_avail:
+        type: integer
+      objects:
+        type: integer
+      omap_bytes_used:
+        type: integer
+      percent_used:
+        type: number
+      quota_bytes:
+        type: integer
+      quota_objects:
+        type: integer
+      rd:
+        type: integer
+      rd_bytes:
+        type: integer
+      stored:
+        type: integer
+      stored_data:
+        type: integer
+      stored_omap:
+        type: integer
+      stored_raw:
+        type: integer
+      wr:
+        type: integer
+      wr_bytes:
+        type: integer
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePools:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      stats:
+        $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePoolStats'
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueStorageStats:
+    properties:
+      num_osds:
+        type: integer
+      num_per_pool_omap_osds:
+        type: integer
+      num_per_pool_osds:
+        type: integer
+      total_avail_bytes:
+        type: integer
+      total_bytes:
+        type: integer
+      total_used_bytes:
+        type: integer
+      total_used_raw_bytes:
+        type: integer
+      total_used_raw_ratio:
+        type: number
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSClone:
+    properties:
+      disabled:
+        type: string
+      failed:
+        type: string
+      failureIgnored:
+        type: string
+      group:
+        items:
+          $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResourceGroup'
+        type: array
+      id:
+        description: Text           string                 `xml:",chardata"`
+        type: string
+      maintenance:
+        type: string
+      managed:
+        type: string
+      multiState:
+        type: string
+      resource:
+        items:
+          $ref: '#/definitions/TypePCSesource'
+        type: array
+      unique:
+        type: string
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResourceGroup:
+    properties:
+      disabled:
+        type: string
+      id:
+        description: Text            string            `xml:",chardata"`
+        type: string
+      maintenance:
+        type: string
+      managed:
+        type: string
+      numberResources:
+        type: string
+      resource:
+        items:
+          $ref: '#/definitions/TypePCSesource'
+        type: array
+    type: object
+  github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResources:
+    properties:
+      PCSResource:
+        items:
+          $ref: '#/definitions/TypePCSesource'
+        type: array
+    type: object
+  github_com_ycyun_Cube-API_internal_infra_utils.TypeVersion:
+    properties:
+      debug:
+        type: boolean
+      version:
+        type: string
+    type: object
+  internal_domain_model_cube.DiskDevice:
+    properties:
+      children:
+        items:
+          $ref: '#/definitions/internal_domain_model_cube.DiskDevice'
+        type: array
+      group:
+        type: string
+      id:
+        type: string
+      kname:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      path:
+        type: string
+      pkname:
+        description: 내부 트리 재구성에만 쓰고, 최종 응답에서는 제거합니다.
+        type: string
+      rbd_path:
+        type: string
+      rota:
+        type: boolean
+      size:
+        type: string
+      state:
+        type: string
+      subsystems:
+        type: string
+      tran:
+        type: string
+      type:
+        type: string
+      vendor:
+        type: string
+      wwn:
+        type: string
+    type: object
+  internal_domain_model_cube.NICStatus:
     properties:
       addr_info:
         items:
@@ -1515,7 +1492,7 @@ definitions:
                 type: integer
               arp_missed_max:
                 type: integer
-              arp_validate: { }
+              arp_validate: {}
               bridge_id:
                 type: string
               downdelay:
@@ -1731,7 +1708,7 @@ definitions:
         type: object
       links:
         items:
-          $ref: '#/definitions/model.NICStatus'
+          $ref: '#/definitions/internal_domain_model_cube.NICStatus'
         type: array
       master:
         type: string
@@ -1766,239 +1743,10 @@ definitions:
       txqlen:
         type: integer
       vfinfo_list:
-        items: { }
+        items: {}
         type: array
     type: object
-  model.TypeClusterStatus:
-    properties:
-      message:
-        items:
-          type: string
-        type: array
-      status:
-        type: string
-    type: object
-  model.TypeDisks:
-    properties:
-      in:
-        type: integer
-      total:
-        type: integer
-      up:
-        type: integer
-    type: object
-  model.TypeGateways:
-    properties:
-      quorum:
-        items:
-          type: string
-        type: array
-      total:
-        type: integer
-      up:
-        type: integer
-    type: object
-  model.TypeGlueClass:
-    properties:
-      total_avail_bytes:
-        type: integer
-      total_bytes:
-        type: integer
-      total_used_bytes:
-        type: integer
-      total_used_raw_bytes:
-        type: integer
-      total_used_raw_ratio:
-        type: number
-      type:
-        type: string
-    type: object
-  model.TypeGlueDaemon:
-    properties:
-      container_id:
-        type: string
-      container_image_digests:
-        items:
-          type: string
-        type: array
-      container_image_id:
-        type: string
-      container_image_name:
-        type: string
-      cpu_percentage:
-        type: string
-      created:
-        type: string
-      daemon_id:
-        type: string
-      daemon_name:
-        type: string
-      daemon_type:
-        type: string
-      events:
-        items:
-          type: string
-        type: array
-      hostname:
-        type: string
-      is_active:
-        type: boolean
-      last_refresh:
-        type: string
-      memory_request:
-        type: integer
-      memory_usage:
-        type: integer
-      ports:
-        items:
-          type: integer
-        type: array
-      service_name:
-        type: string
-      started:
-        type: string
-      status:
-        type: integer
-      status_desc:
-        type: string
-      version:
-        type: string
-    type: object
-  model.TypeGlueDaemons:
-    properties:
-      alertmanager:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      ceph-exporter:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      crash:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      grafana:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      iscsi:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      mds:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      mgr:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      mon:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      node-exporter:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      osd:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      other:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      prometheus:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      rbd-mirror:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-      refreshTime:
-        type: string
-      rgw:
-        items:
-          $ref: '#/definitions/model.TypeGlueDaemon'
-        type: array
-    type: object
-  model.TypeGluePoolStats:
-    properties:
-      avail_raw:
-        type: integer
-      bytes_used:
-        type: integer
-      compress_bytes_used:
-        type: integer
-      compress_under_bytes:
-        type: integer
-      data_bytes_used:
-        type: integer
-      dirty:
-        type: integer
-      kb_used:
-        type: integer
-      max_avail:
-        type: integer
-      objects:
-        type: integer
-      omap_bytes_used:
-        type: integer
-      percent_used:
-        type: number
-      quota_bytes:
-        type: integer
-      quota_objects:
-        type: integer
-      rd:
-        type: integer
-      rd_bytes:
-        type: integer
-      stored:
-        type: integer
-      stored_data:
-        type: integer
-      stored_omap:
-        type: integer
-      stored_raw:
-        type: integer
-      wr:
-        type: integer
-      wr_bytes:
-        type: integer
-    type: object
-  model.TypeGluePools:
-    properties:
-      id:
-        type: integer
-      name:
-        type: string
-      stats:
-        $ref: '#/definitions/model.TypeGluePoolStats'
-    type: object
-  model.TypeGlueStorageStats:
-    properties:
-      num_osds:
-        type: integer
-      num_per_pool_omap_osds:
-        type: integer
-      num_per_pool_osds:
-        type: integer
-      total_avail_bytes:
-        type: integer
-      total_bytes:
-        type: integer
-      total_used_bytes:
-        type: integer
-      total_used_raw_bytes:
-        type: integer
-      total_used_raw_ratio:
-        type: number
-    type: object
-  model.TypeHost:
+  internal_domain_model_cube.TypeHost:
     properties:
       hostnames:
         items:
@@ -2007,16 +1755,16 @@ definitions:
       ip:
         type: string
     type: object
-  model.TypeHosts:
+  internal_domain_model_cube.TypeHosts:
     properties:
       host:
         items:
-          $ref: '#/definitions/model.TypeHost'
+          $ref: '#/definitions/internal_domain_model_cube.TypeHost'
         type: array
       refresh_time:
         type: string
     type: object
-  model.TypeNICStatus:
+  internal_domain_model_cube.TypeNICStatus:
     properties:
       bridges:
         items:
@@ -2029,65 +1777,34 @@ definitions:
       refreshTime:
         type: string
     type: object
-  model.TypePCSClone:
+  internal_service_controller.TypeNeighbor:
     properties:
-      disabled:
+      hostname:
         type: string
-      failed:
-        type: string
-      failureIgnored:
-        type: string
-      group:
-        items:
-          $ref: '#/definitions/model.TypePCSResourceGroup'
-        type: array
-      id:
-        description: Text           string                 `xml:",chardata"`
-        type: string
-      maintenance:
-        type: string
-      managed:
-        type: string
-      multiState:
-        type: string
-      resource:
-        items:
-          $ref: '#/definitions/TypePCSesource'
-        type: array
-      unique:
+      ip:
         type: string
     type: object
-  model.TypePCSResourceGroup:
+  internal_service_controller.TypeNeighborInfo:
     properties:
-      disabled:
-        type: string
-      id:
-        description: Text            string            `xml:",chardata"`
-        type: string
-      maintenance:
-        type: string
-      managed:
-        type: string
-      numberResources:
-        type: string
-      resource:
-        items:
-          $ref: '#/definitions/TypePCSesource'
-        type: array
+      code:
+        type: integer
+      info:
+        additionalProperties: true
+        type: object
     type: object
-  model.TypePCSResources:
+  internal_service_controller.TypeNeighborInfos:
     properties:
-      PCSResource:
-        items:
-          $ref: '#/definitions/TypePCSesource'
-        type: array
+      neighbors:
+        additionalProperties:
+          $ref: '#/definitions/internal_service_controller.TypeNeighborInfo'
+        type: object
     type: object
-  utils.TypeVersion:
+  internal_service_controller.TypeNeighbors:
     properties:
-      debug:
-        type: boolean
-      version:
-        type: string
+      neighbors:
+        items:
+          $ref: '#/definitions/internal_service_controller.TypeNeighbor'
+        type: array
     type: object
 externalDocs:
   description: ABLECLOUD
@@ -2108,10 +1825,10 @@ paths:
   /Sample:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: <<Sample>>의 상태값을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2131,20 +1848,38 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Status of <<Sample>>
       tags:
-        - API
-        - <<Sample>>
+      - API
+      - <<Sample>>
   /cube/disk:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: Cube의 Disk목록을 보여줍니다.
+      parameters:
+      - description: disk action
+        enum:
+        - list
+        - gfs
+        - multipath
+        - rbd
+        in: query
+        name: action
+        type: string
+      - description: response view
+        enum:
+        - tree
+        - flat
+        - list
+        in: query
+        name: view
+        type: string
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/TypeBlockDevice'
+            $ref: '#/definitions/DiskResponse'
         "400":
           description: Bad Request
           schema:
@@ -2159,20 +1894,20 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show List of Disk
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /cube/hosts:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: Cube의 Hosts 파일의 목록을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.TypeHosts'
+            $ref: '#/definitions/internal_domain_model_cube.TypeHosts'
         "400":
           description: Bad Request
           schema:
@@ -2187,20 +1922,20 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show List of Hosts
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /cube/nics:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: Cube의 NIC목록을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.TypeNICStatus'
+            $ref: '#/definitions/internal_domain_model_cube.TypeNICStatus'
         "400":
           description: Bad Request
           schema:
@@ -2215,15 +1950,15 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show List of NIC
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /dashboard:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GLUE의 상태값을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2243,15 +1978,15 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show StorageCenterClusterStatus of GLUE
       tags:
-        - API
-        - Dashboard
+      - API
+      - Dashboard
   /err:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: Error.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2271,15 +2006,15 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Error
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /glue:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GLUE의 상태값을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2299,16 +2034,16 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Status of GLUE
       tags:
-        - API
-        - Glue
-        - GLUE
+      - API
+      - Glue
+      - GLUE
   /glue/auth:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GLUE의 인증키를 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2328,16 +2063,16 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Auth of GLUE
       tags:
-        - API
-        - Glue
-        - GLUE
+      - API
+      - Glue
+      - GLUE
   /glue/auths:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GLUE의 인증키 목록을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2357,16 +2092,16 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Auths of GLUE
       tags:
-        - API
-        - Glue
-        - GLUE
+      - API
+      - Glue
+      - GLUE
   /mold:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: MOLD의 상태값을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
@@ -2386,32 +2121,32 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Status of MOLD
       tags:
-        - API
-        - Mold
-        - MOLD
+      - API
+      - Mold
+      - MOLD
   /neighbor:
     delete:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: DeleteNeighbor.
       parameters:
-        - description: Neighbor IP
-          in: formData
-          name: ip
-          required: true
-          type: string
-        - description: Neighbor Hostname
-          in: formData
-          name: hostname
-          required: true
-          type: string
+      - description: Neighbor IP
+        in: formData
+        name: ip
+        required: true
+        type: string
+      - description: Neighbor Hostname
+        in: formData
+        name: hostname
+        required: true
+        type: string
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.TypeNeighbor'
+            $ref: '#/definitions/internal_service_controller.TypeNeighbor'
         "400":
           description: Bad Request
           schema:
@@ -2426,19 +2161,19 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: DeleteNeighbor
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GetNeighbor.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.TypeNeighbors'
+            $ref: '#/definitions/internal_service_controller.TypeNeighbors'
         "400":
           description: Bad Request
           schema:
@@ -2453,30 +2188,30 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: GetNeighbor
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
     post:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: PutNeighbor.
       parameters:
-        - description: Neighbor IP
-          in: formData
-          name: ip
-          required: true
-          type: string
-        - description: Neighbor Hostname
-          in: formData
-          name: hostname
-          required: true
-          type: string
+      - description: Neighbor IP
+        in: formData
+        name: ip
+        required: true
+        type: string
+      - description: Neighbor Hostname
+        in: formData
+        name: hostname
+        required: true
+        type: string
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.TypeNeighbors'
+            $ref: '#/definitions/internal_service_controller.TypeNeighbors'
         "400":
           description: Bad Request
           schema:
@@ -2491,30 +2226,30 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: PutNeighbor
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
     put:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: PutNeighbor.
       parameters:
-        - description: Neighbor IP
-          in: formData
-          name: ip
-          required: true
-          type: string
-        - description: Neighbor Hostname
-          in: formData
-          name: hostname
-          required: true
-          type: string
+      - description: Neighbor IP
+        in: formData
+        name: ip
+        required: true
+        type: string
+      - description: Neighbor Hostname
+        in: formData
+        name: hostname
+        required: true
+        type: string
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.TypeNeighbors'
+            $ref: '#/definitions/internal_service_controller.TypeNeighbors'
         "400":
           description: Bad Request
           schema:
@@ -2529,20 +2264,20 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: PutNeighbor
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /neighbor/info:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: GetNeighbor.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.TypeNeighborInfos'
+            $ref: '#/definitions/internal_service_controller.TypeNeighborInfos'
         "400":
           description: Bad Request
           schema:
@@ -2557,20 +2292,20 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: GetNeighbor
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
   /pcs:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: PCS 상태값을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.TypePCSResources'
+            $ref: '#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResources'
         "400":
           description: Bad Request
           schema:
@@ -2585,20 +2320,20 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Status of PCS
       tags:
-        - API
-        - PCS
+      - API
+      - PCS
   /version:
     get:
       consumes:
-        - application/x-www-form-urlencoded
+      - application/x-www-form-urlencoded
       description: CUBE 의 버전을 보여줍니다.
       produces:
-        - application/json
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/utils.TypeVersion'
+            $ref: '#/definitions/github_com_ycyun_Cube-API_internal_infra_utils.TypeVersion'
         "400":
           description: Bad Request
           schema:
@@ -2613,11 +2348,11 @@ paths:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: Show Versions of CUBE
       tags:
-        - API
-        - CUBE
+      - API
+      - CUBE
 schemes:
-  - http
-  - https
+- http
+- https
 securityDefinitions:
   None:
     type: basic

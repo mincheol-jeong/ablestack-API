@@ -80,11 +80,36 @@ const docTemplate = `{
                     "CUBE"
                 ],
                 "summary": "Show List of Disk",
+                "parameters": [
+                    {
+                        "enum": [
+                            "list",
+                            "gfs",
+                            "multipath",
+                            "rbd"
+                        ],
+                        "type": "string",
+                        "description": "disk action",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "tree",
+                            "flat",
+                            "list"
+                        ],
+                        "type": "string",
+                        "description": "response view",
+                        "name": "view",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/TypeBlockDevice"
+                            "$ref": "#/definitions/DiskResponse"
                         }
                     },
                     "400": {
@@ -126,7 +151,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.TypeHosts"
+                            "$ref": "#/definitions/internal_domain_model_cube.TypeHosts"
                         }
                     },
                     "400": {
@@ -168,7 +193,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.TypeNICStatus"
+                            "$ref": "#/definitions/internal_domain_model_cube.TypeNICStatus"
                         }
                     },
                     "400": {
@@ -466,7 +491,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.TypeNeighbors"
+                            "$ref": "#/definitions/internal_service_controller.TypeNeighbors"
                         }
                     },
                     "400": {
@@ -522,7 +547,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.TypeNeighbors"
+                            "$ref": "#/definitions/internal_service_controller.TypeNeighbors"
                         }
                     },
                     "400": {
@@ -578,7 +603,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.TypeNeighbors"
+                            "$ref": "#/definitions/internal_service_controller.TypeNeighbors"
                         }
                     },
                     "400": {
@@ -634,7 +659,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.TypeNeighbor"
+                            "$ref": "#/definitions/internal_service_controller.TypeNeighbor"
                         }
                     },
                     "400": {
@@ -676,7 +701,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.TypeNeighborInfos"
+                            "$ref": "#/definitions/internal_service_controller.TypeNeighborInfos"
                         }
                     },
                     "400": {
@@ -718,7 +743,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.TypePCSResources"
+                            "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResources"
                         }
                     },
                     "400": {
@@ -760,7 +785,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/utils.TypeVersion"
+                            "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_infra_utils.TypeVersion"
                         }
                     },
                     "400": {
@@ -786,6 +811,29 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "DiskResponse": {
+            "type": "object",
+            "properties": {
+                "blockdevices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_domain_model_cube.DiskDevice"
+                    }
+                },
+                "raidcontrollers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "refresh_time": {
+                    "type": "string"
+                }
+            }
+        },
         "Errorlog": {
             "type": "object",
             "properties": {
@@ -845,497 +893,6 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/TypeAuth"
-                    }
-                },
-                "refreshTime": {
-                    "type": "string"
-                }
-            }
-        },
-        "TypeBlockDevice": {
-            "type": "object",
-            "properties": {
-                "blockdevices": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "alignment": {
-                                "type": "integer"
-                            },
-                            "children": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "alignment": {
-                                            "type": "integer"
-                                        },
-                                        "children": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "alignment": {
-                                                        "type": "integer"
-                                                    },
-                                                    "dax": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "disc-aln": {
-                                                        "type": "integer"
-                                                    },
-                                                    "disc-gran": {
-                                                        "type": "string"
-                                                    },
-                                                    "disc-max": {
-                                                        "type": "string"
-                                                    },
-                                                    "disc-zero": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "fsavail": {
-                                                        "type": "string"
-                                                    },
-                                                    "fsroots": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "fssize": {
-                                                        "type": "string"
-                                                    },
-                                                    "fstype": {
-                                                        "type": "string"
-                                                    },
-                                                    "fsuse%": {
-                                                        "type": "string"
-                                                    },
-                                                    "fsused": {
-                                                        "type": "string"
-                                                    },
-                                                    "fsver": {
-                                                        "type": "string"
-                                                    },
-                                                    "group": {
-                                                        "type": "string"
-                                                    },
-                                                    "hctl": {},
-                                                    "hotplug": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "kname": {
-                                                        "type": "string"
-                                                    },
-                                                    "label": {},
-                                                    "log-sec": {
-                                                        "type": "integer"
-                                                    },
-                                                    "maj:min": {
-                                                        "type": "string"
-                                                    },
-                                                    "min-io": {
-                                                        "type": "integer"
-                                                    },
-                                                    "mode": {
-                                                        "type": "string"
-                                                    },
-                                                    "model": {},
-                                                    "mountpoint": {
-                                                        "type": "string"
-                                                    },
-                                                    "mountpoints": {
-                                                        "type": "array",
-                                                        "items": {
-                                                            "type": "string"
-                                                        }
-                                                    },
-                                                    "name": {
-                                                        "type": "string"
-                                                    },
-                                                    "opt-io": {
-                                                        "type": "integer"
-                                                    },
-                                                    "owner": {
-                                                        "type": "string"
-                                                    },
-                                                    "partflags": {},
-                                                    "partlabel": {},
-                                                    "parttype": {},
-                                                    "parttypename": {},
-                                                    "partuuid": {},
-                                                    "path": {
-                                                        "type": "string"
-                                                    },
-                                                    "phy-sec": {
-                                                        "type": "integer"
-                                                    },
-                                                    "pkname": {
-                                                        "type": "string"
-                                                    },
-                                                    "pttype": {
-                                                        "type": "string"
-                                                    },
-                                                    "ptuuid": {
-                                                        "type": "string"
-                                                    },
-                                                    "ra": {
-                                                        "type": "integer"
-                                                    },
-                                                    "rand": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "rev": {},
-                                                    "rm": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "ro": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "rota": {
-                                                        "type": "boolean"
-                                                    },
-                                                    "rq-size": {
-                                                        "type": "integer"
-                                                    },
-                                                    "sched": {},
-                                                    "serial": {},
-                                                    "size": {
-                                                        "type": "string"
-                                                    },
-                                                    "state": {
-                                                        "type": "string"
-                                                    },
-                                                    "subsystems": {
-                                                        "type": "string"
-                                                    },
-                                                    "tran": {},
-                                                    "type": {
-                                                        "type": "string"
-                                                    },
-                                                    "uuid": {
-                                                        "type": "string"
-                                                    },
-                                                    "vendor": {},
-                                                    "wsame": {
-                                                        "type": "string"
-                                                    },
-                                                    "wwn": {},
-                                                    "zoned": {
-                                                        "type": "string"
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        "dax": {
-                                            "type": "boolean"
-                                        },
-                                        "disc-aln": {
-                                            "type": "integer"
-                                        },
-                                        "disc-gran": {
-                                            "type": "string"
-                                        },
-                                        "disc-max": {
-                                            "type": "string"
-                                        },
-                                        "disc-zero": {
-                                            "type": "boolean"
-                                        },
-                                        "fsavail": {
-                                            "type": "string"
-                                        },
-                                        "fsroots": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        },
-                                        "fssize": {
-                                            "type": "string"
-                                        },
-                                        "fstype": {
-                                            "type": "string"
-                                        },
-                                        "fsuse%": {
-                                            "type": "string"
-                                        },
-                                        "fsused": {
-                                            "type": "string"
-                                        },
-                                        "fsver": {
-                                            "type": "string"
-                                        },
-                                        "group": {
-                                            "type": "string"
-                                        },
-                                        "hctl": {},
-                                        "hotplug": {
-                                            "type": "boolean"
-                                        },
-                                        "kname": {
-                                            "type": "string"
-                                        },
-                                        "label": {},
-                                        "log-sec": {
-                                            "type": "integer"
-                                        },
-                                        "maj:min": {
-                                            "type": "string"
-                                        },
-                                        "min-io": {
-                                            "type": "integer"
-                                        },
-                                        "mode": {
-                                            "type": "string"
-                                        },
-                                        "model": {},
-                                        "mountpoint": {
-                                            "type": "string"
-                                        },
-                                        "mountpoints": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        },
-                                        "name": {
-                                            "type": "string"
-                                        },
-                                        "opt-io": {
-                                            "type": "integer"
-                                        },
-                                        "owner": {
-                                            "type": "string"
-                                        },
-                                        "partflags": {
-                                            "type": "string"
-                                        },
-                                        "partlabel": {},
-                                        "parttype": {
-                                            "type": "string"
-                                        },
-                                        "parttypename": {
-                                            "type": "string"
-                                        },
-                                        "partuuid": {
-                                            "type": "string"
-                                        },
-                                        "path": {
-                                            "type": "string"
-                                        },
-                                        "phy-sec": {
-                                            "type": "integer"
-                                        },
-                                        "pkname": {
-                                            "type": "string"
-                                        },
-                                        "pttype": {
-                                            "type": "string"
-                                        },
-                                        "ptuuid": {
-                                            "type": "string"
-                                        },
-                                        "ra": {
-                                            "type": "integer"
-                                        },
-                                        "rand": {
-                                            "type": "boolean"
-                                        },
-                                        "rev": {},
-                                        "rm": {
-                                            "type": "boolean"
-                                        },
-                                        "ro": {
-                                            "type": "boolean"
-                                        },
-                                        "rota": {
-                                            "type": "boolean"
-                                        },
-                                        "rq-size": {
-                                            "type": "integer"
-                                        },
-                                        "sched": {
-                                            "type": "string"
-                                        },
-                                        "serial": {},
-                                        "size": {
-                                            "type": "string"
-                                        },
-                                        "state": {
-                                            "type": "string"
-                                        },
-                                        "subsystems": {
-                                            "type": "string"
-                                        },
-                                        "tran": {},
-                                        "type": {
-                                            "type": "string"
-                                        },
-                                        "uuid": {
-                                            "type": "string"
-                                        },
-                                        "vendor": {},
-                                        "wsame": {
-                                            "type": "string"
-                                        },
-                                        "wwn": {
-                                            "type": "string"
-                                        },
-                                        "zoned": {
-                                            "type": "string"
-                                        }
-                                    }
-                                }
-                            },
-                            "dax": {
-                                "type": "boolean"
-                            },
-                            "disc-aln": {
-                                "type": "integer"
-                            },
-                            "disc-gran": {
-                                "type": "string"
-                            },
-                            "disc-max": {
-                                "type": "string"
-                            },
-                            "disc-zero": {
-                                "type": "boolean"
-                            },
-                            "fsavail": {},
-                            "fsroots": {
-                                "type": "array",
-                                "items": {}
-                            },
-                            "fssize": {},
-                            "fstype": {
-                                "type": "string"
-                            },
-                            "fsuse%": {},
-                            "fsused": {},
-                            "fsver": {
-                                "type": "string"
-                            },
-                            "group": {
-                                "type": "string"
-                            },
-                            "hctl": {
-                                "type": "string"
-                            },
-                            "hotplug": {
-                                "type": "boolean"
-                            },
-                            "kname": {
-                                "type": "string"
-                            },
-                            "label": {},
-                            "log-sec": {
-                                "type": "integer"
-                            },
-                            "maj:min": {
-                                "type": "string"
-                            },
-                            "min-io": {
-                                "type": "integer"
-                            },
-                            "mode": {
-                                "type": "string"
-                            },
-                            "model": {
-                                "type": "string"
-                            },
-                            "mountpoint": {},
-                            "mountpoints": {
-                                "type": "array",
-                                "items": {}
-                            },
-                            "name": {
-                                "type": "string"
-                            },
-                            "opt-io": {
-                                "type": "integer"
-                            },
-                            "owner": {
-                                "type": "string"
-                            },
-                            "partflags": {},
-                            "partlabel": {},
-                            "parttype": {},
-                            "parttypename": {},
-                            "partuuid": {},
-                            "path": {
-                                "type": "string"
-                            },
-                            "phy-sec": {
-                                "type": "integer"
-                            },
-                            "pkname": {},
-                            "pttype": {
-                                "type": "string"
-                            },
-                            "ptuuid": {
-                                "type": "string"
-                            },
-                            "ra": {
-                                "type": "integer"
-                            },
-                            "rand": {
-                                "type": "boolean"
-                            },
-                            "rev": {
-                                "type": "string"
-                            },
-                            "rm": {
-                                "type": "boolean"
-                            },
-                            "ro": {
-                                "type": "boolean"
-                            },
-                            "rota": {
-                                "type": "boolean"
-                            },
-                            "rq-size": {
-                                "type": "integer"
-                            },
-                            "sched": {
-                                "type": "string"
-                            },
-                            "serial": {
-                                "type": "string"
-                            },
-                            "size": {
-                                "type": "string"
-                            },
-                            "state": {
-                                "type": "string"
-                            },
-                            "subsystems": {
-                                "type": "string"
-                            },
-                            "tran": {
-                                "type": "string"
-                            },
-                            "type": {
-                                "type": "string"
-                            },
-                            "uuid": {
-                                "type": "string"
-                            },
-                            "vendor": {
-                                "type": "string"
-                            },
-                            "wsame": {
-                                "type": "string"
-                            },
-                            "wwn": {
-                                "type": "string"
-                            },
-                            "zoned": {
-                                "type": "string"
-                            }
-                        }
                     }
                 },
                 "refreshTime": {
@@ -2247,16 +1804,16 @@ const docTemplate = `{
                 "pools": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TypeGluePools"
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePools"
                     }
                 },
                 "stats": {
-                    "$ref": "#/definitions/model.TypeGlueStorageStats"
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueStorageStats"
                 },
                 "stats_by_class": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TypeGlueClass"
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueClass"
                     }
                 }
             }
@@ -2639,7 +2196,7 @@ const docTemplate = `{
                         "clone": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/model.TypePCSClone"
+                                "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSClone"
                             }
                         },
                         "resource": {
@@ -2871,16 +2428,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cluster-status": {
-                    "$ref": "#/definitions/model.TypeClusterStatus"
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeClusterStatus"
                 },
                 "daemons": {
-                    "$ref": "#/definitions/model.TypeGlueDaemons"
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemons"
                 },
                 "disks": {
-                    "$ref": "#/definitions/model.TypeDisks"
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeDisks"
                 },
                 "gateways": {
-                    "$ref": "#/definitions/model.TypeGateways"
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeGateways"
                 },
                 "refresh-time": {
                     "type": "string"
@@ -2890,52 +2447,506 @@ const docTemplate = `{
                 }
             }
         },
-        "controller.TypeNeighbor": {
+        "github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeClusterStatus": {
             "type": "object",
             "properties": {
+                "message": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeDisks": {
+            "type": "object",
+            "properties": {
+                "in": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "up": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_dashboard.TypeGateways": {
+            "type": "object",
+            "properties": {
+                "quorum": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "up": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueClass": {
+            "type": "object",
+            "properties": {
+                "total_avail_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                },
+                "total_used_bytes": {
+                    "type": "integer"
+                },
+                "total_used_raw_bytes": {
+                    "type": "integer"
+                },
+                "total_used_raw_ratio": {
+                    "type": "number"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon": {
+            "type": "object",
+            "properties": {
+                "container_id": {
+                    "type": "string"
+                },
+                "container_image_digests": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "container_image_id": {
+                    "type": "string"
+                },
+                "container_image_name": {
+                    "type": "string"
+                },
+                "cpu_percentage": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "string"
+                },
+                "daemon_id": {
+                    "type": "string"
+                },
+                "daemon_name": {
+                    "type": "string"
+                },
+                "daemon_type": {
+                    "type": "string"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "hostname": {
                     "type": "string"
                 },
-                "ip": {
+                "is_active": {
+                    "type": "boolean"
+                },
+                "last_refresh": {
+                    "type": "string"
+                },
+                "memory_request": {
+                    "type": "integer"
+                },
+                "memory_usage": {
+                    "type": "integer"
+                },
+                "ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "started": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "status_desc": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }
         },
-        "controller.TypeNeighborInfo": {
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemons": {
             "type": "object",
             "properties": {
-                "code": {
-                    "type": "integer"
-                },
-                "info": {
-                    "type": "object",
-                    "additionalProperties": true
-                }
-            }
-        },
-        "controller.TypeNeighborInfos": {
-            "type": "object",
-            "properties": {
-                "neighbors": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/controller.TypeNeighborInfo"
-                    }
-                }
-            }
-        },
-        "controller.TypeNeighbors": {
-            "type": "object",
-            "properties": {
-                "neighbors": {
+                "alertmanager": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/controller.TypeNeighbor"
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "ceph-exporter": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "crash": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "grafana": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "iscsi": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "mds": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "mgr": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "mon": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "node-exporter": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "osd": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "other": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "prometheus": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "rbd-mirror": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
+                    }
+                },
+                "refreshTime": {
+                    "type": "string"
+                },
+                "rgw": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueDaemon"
                     }
                 }
             }
         },
-        "model.NICStatus": {
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePoolStats": {
+            "type": "object",
+            "properties": {
+                "avail_raw": {
+                    "type": "integer"
+                },
+                "bytes_used": {
+                    "type": "integer"
+                },
+                "compress_bytes_used": {
+                    "type": "integer"
+                },
+                "compress_under_bytes": {
+                    "type": "integer"
+                },
+                "data_bytes_used": {
+                    "type": "integer"
+                },
+                "dirty": {
+                    "type": "integer"
+                },
+                "kb_used": {
+                    "type": "integer"
+                },
+                "max_avail": {
+                    "type": "integer"
+                },
+                "objects": {
+                    "type": "integer"
+                },
+                "omap_bytes_used": {
+                    "type": "integer"
+                },
+                "percent_used": {
+                    "type": "number"
+                },
+                "quota_bytes": {
+                    "type": "integer"
+                },
+                "quota_objects": {
+                    "type": "integer"
+                },
+                "rd": {
+                    "type": "integer"
+                },
+                "rd_bytes": {
+                    "type": "integer"
+                },
+                "stored": {
+                    "type": "integer"
+                },
+                "stored_data": {
+                    "type": "integer"
+                },
+                "stored_omap": {
+                    "type": "integer"
+                },
+                "stored_raw": {
+                    "type": "integer"
+                },
+                "wr": {
+                    "type": "integer"
+                },
+                "wr_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePools": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "stats": {
+                    "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGluePoolStats"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_glue.TypeGlueStorageStats": {
+            "type": "object",
+            "properties": {
+                "num_osds": {
+                    "type": "integer"
+                },
+                "num_per_pool_omap_osds": {
+                    "type": "integer"
+                },
+                "num_per_pool_osds": {
+                    "type": "integer"
+                },
+                "total_avail_bytes": {
+                    "type": "integer"
+                },
+                "total_bytes": {
+                    "type": "integer"
+                },
+                "total_used_bytes": {
+                    "type": "integer"
+                },
+                "total_used_raw_bytes": {
+                    "type": "integer"
+                },
+                "total_used_raw_ratio": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSClone": {
+            "type": "object",
+            "properties": {
+                "disabled": {
+                    "type": "string"
+                },
+                "failed": {
+                    "type": "string"
+                },
+                "failureIgnored": {
+                    "type": "string"
+                },
+                "group": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResourceGroup"
+                    }
+                },
+                "id": {
+                    "description": "Text           string                 ` + "`" + `xml:\",chardata\"` + "`" + `",
+                    "type": "string"
+                },
+                "maintenance": {
+                    "type": "string"
+                },
+                "managed": {
+                    "type": "string"
+                },
+                "multiState": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TypePCSesource"
+                    }
+                },
+                "unique": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResourceGroup": {
+            "type": "object",
+            "properties": {
+                "disabled": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Text            string            ` + "`" + `xml:\",chardata\"` + "`" + `",
+                    "type": "string"
+                },
+                "maintenance": {
+                    "type": "string"
+                },
+                "managed": {
+                    "type": "string"
+                },
+                "numberResources": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TypePCSesource"
+                    }
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_domain_model_pcs.TypePCSResources": {
+            "type": "object",
+            "properties": {
+                "PCSResource": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TypePCSesource"
+                    }
+                }
+            }
+        },
+        "github_com_ycyun_Cube-API_internal_infra_utils.TypeVersion": {
+            "type": "object",
+            "properties": {
+                "debug": {
+                    "type": "boolean"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_domain_model_cube.DiskDevice": {
+            "type": "object",
+            "properties": {
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_domain_model_cube.DiskDevice"
+                    }
+                },
+                "group": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kname": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "pkname": {
+                    "description": "내부 트리 재구성에만 쓰고, 최종 응답에서는 제거합니다.",
+                    "type": "string"
+                },
+                "rbd_path": {
+                    "type": "string"
+                },
+                "rota": {
+                    "type": "boolean"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "subsystems": {
+                    "type": "string"
+                },
+                "tran": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "vendor": {
+                    "type": "string"
+                },
+                "wwn": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_domain_model_cube.NICStatus": {
             "type": "object",
             "properties": {
                 "addr_info": {
@@ -3379,7 +3390,7 @@ const docTemplate = `{
                 "links": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.NICStatus"
+                        "$ref": "#/definitions/internal_domain_model_cube.NICStatus"
                     }
                 },
                 "master": {
@@ -3436,355 +3447,7 @@ const docTemplate = `{
                 }
             }
         },
-        "model.TypeClusterStatus": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.TypeDisks": {
-            "type": "object",
-            "properties": {
-                "in": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "up": {
-                    "type": "integer"
-                }
-            }
-        },
-        "model.TypeGateways": {
-            "type": "object",
-            "properties": {
-                "quorum": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "up": {
-                    "type": "integer"
-                }
-            }
-        },
-        "model.TypeGlueClass": {
-            "type": "object",
-            "properties": {
-                "total_avail_bytes": {
-                    "type": "integer"
-                },
-                "total_bytes": {
-                    "type": "integer"
-                },
-                "total_used_bytes": {
-                    "type": "integer"
-                },
-                "total_used_raw_bytes": {
-                    "type": "integer"
-                },
-                "total_used_raw_ratio": {
-                    "type": "number"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.TypeGlueDaemon": {
-            "type": "object",
-            "properties": {
-                "container_id": {
-                    "type": "string"
-                },
-                "container_image_digests": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "container_image_id": {
-                    "type": "string"
-                },
-                "container_image_name": {
-                    "type": "string"
-                },
-                "cpu_percentage": {
-                    "type": "string"
-                },
-                "created": {
-                    "type": "string"
-                },
-                "daemon_id": {
-                    "type": "string"
-                },
-                "daemon_name": {
-                    "type": "string"
-                },
-                "daemon_type": {
-                    "type": "string"
-                },
-                "events": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "hostname": {
-                    "type": "string"
-                },
-                "is_active": {
-                    "type": "boolean"
-                },
-                "last_refresh": {
-                    "type": "string"
-                },
-                "memory_request": {
-                    "type": "integer"
-                },
-                "memory_usage": {
-                    "type": "integer"
-                },
-                "ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "started": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "integer"
-                },
-                "status_desc": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.TypeGlueDaemons": {
-            "type": "object",
-            "properties": {
-                "alertmanager": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "ceph-exporter": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "crash": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "grafana": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "iscsi": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "mds": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "mgr": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "mon": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "node-exporter": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "osd": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "other": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "prometheus": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "rbd-mirror": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                },
-                "refreshTime": {
-                    "type": "string"
-                },
-                "rgw": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypeGlueDaemon"
-                    }
-                }
-            }
-        },
-        "model.TypeGluePoolStats": {
-            "type": "object",
-            "properties": {
-                "avail_raw": {
-                    "type": "integer"
-                },
-                "bytes_used": {
-                    "type": "integer"
-                },
-                "compress_bytes_used": {
-                    "type": "integer"
-                },
-                "compress_under_bytes": {
-                    "type": "integer"
-                },
-                "data_bytes_used": {
-                    "type": "integer"
-                },
-                "dirty": {
-                    "type": "integer"
-                },
-                "kb_used": {
-                    "type": "integer"
-                },
-                "max_avail": {
-                    "type": "integer"
-                },
-                "objects": {
-                    "type": "integer"
-                },
-                "omap_bytes_used": {
-                    "type": "integer"
-                },
-                "percent_used": {
-                    "type": "number"
-                },
-                "quota_bytes": {
-                    "type": "integer"
-                },
-                "quota_objects": {
-                    "type": "integer"
-                },
-                "rd": {
-                    "type": "integer"
-                },
-                "rd_bytes": {
-                    "type": "integer"
-                },
-                "stored": {
-                    "type": "integer"
-                },
-                "stored_data": {
-                    "type": "integer"
-                },
-                "stored_omap": {
-                    "type": "integer"
-                },
-                "stored_raw": {
-                    "type": "integer"
-                },
-                "wr": {
-                    "type": "integer"
-                },
-                "wr_bytes": {
-                    "type": "integer"
-                }
-            }
-        },
-        "model.TypeGluePools": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "integer"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "stats": {
-                    "$ref": "#/definitions/model.TypeGluePoolStats"
-                }
-            }
-        },
-        "model.TypeGlueStorageStats": {
-            "type": "object",
-            "properties": {
-                "num_osds": {
-                    "type": "integer"
-                },
-                "num_per_pool_omap_osds": {
-                    "type": "integer"
-                },
-                "num_per_pool_osds": {
-                    "type": "integer"
-                },
-                "total_avail_bytes": {
-                    "type": "integer"
-                },
-                "total_bytes": {
-                    "type": "integer"
-                },
-                "total_used_bytes": {
-                    "type": "integer"
-                },
-                "total_used_raw_bytes": {
-                    "type": "integer"
-                },
-                "total_used_raw_ratio": {
-                    "type": "number"
-                }
-            }
-        },
-        "model.TypeHost": {
+        "internal_domain_model_cube.TypeHost": {
             "type": "object",
             "properties": {
                 "hostnames": {
@@ -3798,13 +3461,13 @@ const docTemplate = `{
                 }
             }
         },
-        "model.TypeHosts": {
+        "internal_domain_model_cube.TypeHosts": {
             "type": "object",
             "properties": {
                 "host": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TypeHost"
+                        "$ref": "#/definitions/internal_domain_model_cube.TypeHost"
                     }
                 },
                 "refresh_time": {
@@ -3812,7 +3475,7 @@ const docTemplate = `{
                 }
             }
         },
-        "model.TypeNICStatus": {
+        "internal_domain_model_cube.TypeNICStatus": {
             "type": "object",
             "properties": {
                 "bridges": {
@@ -3832,94 +3495,48 @@ const docTemplate = `{
                 }
             }
         },
-        "model.TypePCSClone": {
+        "internal_service_controller.TypeNeighbor": {
             "type": "object",
             "properties": {
-                "disabled": {
+                "hostname": {
                     "type": "string"
                 },
-                "failed": {
-                    "type": "string"
-                },
-                "failureIgnored": {
-                    "type": "string"
-                },
-                "group": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.TypePCSResourceGroup"
-                    }
-                },
-                "id": {
-                    "description": "Text           string                 ` + "`" + `xml:\",chardata\"` + "`" + `",
-                    "type": "string"
-                },
-                "maintenance": {
-                    "type": "string"
-                },
-                "managed": {
-                    "type": "string"
-                },
-                "multiState": {
-                    "type": "string"
-                },
-                "resource": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/TypePCSesource"
-                    }
-                },
-                "unique": {
+                "ip": {
                     "type": "string"
                 }
             }
         },
-        "model.TypePCSResourceGroup": {
+        "internal_service_controller.TypeNeighborInfo": {
             "type": "object",
             "properties": {
-                "disabled": {
-                    "type": "string"
+                "code": {
+                    "type": "integer"
                 },
-                "id": {
-                    "description": "Text            string            ` + "`" + `xml:\",chardata\"` + "`" + `",
-                    "type": "string"
-                },
-                "maintenance": {
-                    "type": "string"
-                },
-                "managed": {
-                    "type": "string"
-                },
-                "numberResources": {
-                    "type": "string"
-                },
-                "resource": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/TypePCSesource"
+                "info": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
+        },
+        "internal_service_controller.TypeNeighborInfos": {
+            "type": "object",
+            "properties": {
+                "neighbors": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/internal_service_controller.TypeNeighborInfo"
                     }
                 }
             }
         },
-        "model.TypePCSResources": {
+        "internal_service_controller.TypeNeighbors": {
             "type": "object",
             "properties": {
-                "PCSResource": {
+                "neighbors": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/TypePCSesource"
+                        "$ref": "#/definitions/internal_service_controller.TypeNeighbor"
                     }
-                }
-            }
-        },
-        "utils.TypeVersion": {
-            "type": "object",
-            "properties": {
-                "debug": {
-                    "type": "boolean"
-                },
-                "version": {
-                    "type": "string"
                 }
             }
         }

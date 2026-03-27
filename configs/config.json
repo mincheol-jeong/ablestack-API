@@ -1,0 +1,16 @@
+{
+  "neighbor": [
+    {
+      "ip": "10.10.1.1",
+      "hostname": "ablecube11"
+    },
+    {
+      "ip": "10.10.1.2",
+      "hostname": "ablecube12"
+    },
+    {
+      "ip": "10.10.1.3",
+      "hostname": "ablecube13"
+    }
+  ]
+}
