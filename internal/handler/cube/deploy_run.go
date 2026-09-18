@@ -3,6 +3,7 @@ package cube
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,17 +25,19 @@ type DeployRunJobListResponse = CubeModel.DeployRunJobListResponse
 type DeployRunStepResult = CubeModel.DeployRunStepResult
 
 const (
-	deployRunJobLimit         = 50
-	deployRunRemoteHTTPTO     = 10 * time.Minute
-	deployRunCCVMCloudInitTO  = 10 * time.Minute
-	deployRunBootstrapReadyTO = 5 * time.Minute
-	deployRunHealthCheckTO    = 5 * time.Second
-	deployRunHealthRetryDelay = 5 * time.Second
-	deployRunSuccessMessage   = "deploy job succeeded"
-	deployRunFailedMessage    = "deploy job failed"
-	deployRunStartedMessage   = "deploy job started"
-	deployRunDefaultMode      = "all"
-	deployRunPartialMode      = "partial"
+	deployRunJobLimit           = 50
+	deployRunRemoteHTTPTO       = 10 * time.Minute
+	deployRunCCVMCloudInitTO    = 10 * time.Minute
+	deployRunBootstrapReadyTO   = 5 * time.Minute
+	deployRunHealthCheckTO      = 5 * time.Second
+	deployRunHealthRetryDelay   = 5 * time.Second
+	deployRunSCVMHealthAttempts = 5
+	deployRunSCVMHealthInterval = 20 * time.Second
+	deployRunSuccessMessage     = "deploy job succeeded"
+	deployRunFailedMessage      = "deploy job failed"
+	deployRunStartedMessage     = "deploy job started"
+	deployRunDefaultMode        = "all"
+	deployRunPartialMode        = "partial"
 )
 
 var deployRunJobs = newDeployRunJobStore()
@@ -60,13 +63,14 @@ func newDeployRunJobStore() *deployRunJobStore {
 // StartDeployRun godoc
 //
 //	@Summary		All-in-one Deploy Run
-//	@Description	기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/스토리지/CCVM 준비 단계를 job으로 순차 실행합니다.
+//	@Description	기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/RBD/GFS/CCVM/Wall 모니터링 준비 단계를 job으로 순차 실행합니다. queued/running job은 동시에 하나만 허용합니다.
 //	@Tags			Cube-Deploy
 //	@Accept			json
 //	@Produce		json
 //	@Param			body	body		CubeModel.DeployRunRequest	true	"deploy run request"
 //	@Success		202	{object}	CubeModel.DeployRunStartResponse
 //	@Failure		400	{object}	HTTP400BadRequest
+//	@Failure		409	{object}	HTTP409Conflict
 //	@Router			/cube/deploy/run [post]
 func StartDeployRun(context *gin.Context) {
 	var req DeployRunRequest
@@ -74,6 +78,14 @@ func StartDeployRun(context *gin.Context) {
 		context.JSON(http.StatusBadRequest, utils.HTTP400BadRequest{
 			ErrCode: http.StatusBadRequest,
 			Message: "invalid request",
+		})
+		return
+	}
+
+	if err := validateDeployRunSelection(req); err != nil {
+		context.JSON(http.StatusBadRequest, utils.HTTP400BadRequest{
+			ErrCode: http.StatusBadRequest,
+			Message: err.Error(),
 		})
 		return
 	}
@@ -87,7 +99,14 @@ func StartDeployRun(context *gin.Context) {
 		return
 	}
 
-	job := deployRunJobs.create(req, steps)
+	job, ok := deployRunJobs.createIfIdle(req, steps)
+	if !ok {
+		context.JSON(http.StatusConflict, utils.HTTP409Conflict{
+			ErrCode: http.StatusConflict,
+			Message: "another deploy job is already queued or running",
+		})
+		return
+	}
 	authHeader := context.GetHeader("Authorization")
 	go runDeployRunJob(job.JobID, req, steps, authHeader)
 
@@ -136,7 +155,7 @@ func ListDeployRunJobs(context *gin.Context) {
 	})
 }
 
-func (s *deployRunJobStore) create(req DeployRunRequest, steps []string) CubeModel.DeployRunJob {
+func (s *deployRunJobStore) createIfIdle(req DeployRunRequest, steps []string) (CubeModel.DeployRunJob, bool) {
 	now := time.Now()
 	jobID := newDeployRunJobID()
 	stepResults := make([]CubeModel.DeployRunStepResult, 0, len(steps))
@@ -153,13 +172,21 @@ func (s *deployRunJobStore) create(req DeployRunRequest, steps []string) CubeMod
 		CreatedAt: now,
 		Steps:     stepResults,
 	}
+	if req.Cluster != nil {
+		job.OSType = normalizeDeployOSType(req.Cluster.Type)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, existing := range s.jobs {
+		if existing.Status == CubeModel.DeployRunStatusQueued || existing.Status == CubeModel.DeployRunStatusRunning {
+			return CubeModel.DeployRunJob{}, false
+		}
+	}
 	s.jobs[jobID] = job
 	s.order = append(s.order, jobID)
 	s.pruneLocked()
-	return cloneDeployRunJob(job)
+	return cloneDeployRunJob(job), true
 }
 
 func (s *deployRunJobStore) get(jobID string) (CubeModel.DeployRunJob, bool) {
@@ -237,10 +264,12 @@ func selectedDeployRunSteps(req DeployRunRequest) []string {
 		CubeModel.DeployRunStepClusterApply,
 		CubeModel.DeployRunStepSCVMPrepare,
 		CubeModel.DeployRunStepSCVMBootstrap,
+		CubeModel.DeployRunStepRBDPrepare,
 		CubeModel.DeployRunStepStoragePrepare,
 		CubeModel.DeployRunStepLocalPrepare,
 		CubeModel.DeployRunStepCCVMPrepare,
 		CubeModel.DeployRunStepCCVMBootstrap,
+		CubeModel.DeployRunStepMonitoringPrepare,
 		CubeModel.DeployRunStepSystemProfile,
 	}
 
@@ -252,6 +281,7 @@ func selectedDeployRunSteps(req DeployRunRequest) []string {
 				selected = append(selected, normalized)
 			}
 		}
+		selected = insertDeployRunRBDPrepare(selected, req)
 	} else {
 		selected = append(selected, allSteps...)
 	}
@@ -279,6 +309,47 @@ func selectedDeployRunSteps(req DeployRunRequest) []string {
 	return out
 }
 
+func validateDeployRunSelection(req DeployRunRequest) error {
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode != "" && mode != deployRunDefaultMode && mode != deployRunPartialMode {
+		return fmt.Errorf("mode must be all or partial")
+	}
+	for field, values := range map[string][]string{"only": req.Only, "skip": req.Skip} {
+		for _, value := range values {
+			if normalizeDeployRunStepName(value) == "" {
+				return fmt.Errorf("unsupported %s step: %s", field, strings.TrimSpace(value))
+			}
+		}
+	}
+	return nil
+}
+
+func insertDeployRunRBDPrepare(steps []string, req DeployRunRequest) []string {
+	if req.RBD == nil {
+		return steps
+	}
+	hasRBD := false
+	storageIndex := -1
+	for index, step := range steps {
+		switch step {
+		case CubeModel.DeployRunStepRBDPrepare:
+			hasRBD = true
+		case CubeModel.DeployRunStepStoragePrepare:
+			if storageIndex < 0 {
+				storageIndex = index
+			}
+		}
+	}
+	if hasRBD || storageIndex < 0 {
+		return steps
+	}
+	out := make([]string, 0, len(steps)+1)
+	out = append(out, steps[:storageIndex]...)
+	out = append(out, CubeModel.DeployRunStepRBDPrepare)
+	out = append(out, steps[storageIndex:]...)
+	return out
+}
+
 func normalizeDeployRunStepName(step string) string {
 	normalized := strings.ToLower(strings.TrimSpace(step))
 	normalized = strings.NewReplacer("-", "_", " ", "_").Replace(normalized)
@@ -291,6 +362,8 @@ func normalizeDeployRunStepName(step string) string {
 		return CubeModel.DeployRunStepSCVMPrepare
 	case "scvm_bootstrap", "storage_vm_bootstrap":
 		return CubeModel.DeployRunStepSCVMBootstrap
+	case "rbd", "rbd_create", "rbd_map", "rbd_prepare":
+		return CubeModel.DeployRunStepRBDPrepare
 	case "storage", "gfs", "gfs_prepare", "storage_prepare":
 		return CubeModel.DeployRunStepStoragePrepare
 	case "local", "local_storage", "local_prepare":
@@ -299,6 +372,8 @@ func normalizeDeployRunStepName(step string) string {
 		return CubeModel.DeployRunStepCCVMPrepare
 	case "ccvm_bootstrap", "cloud_vm_bootstrap":
 		return CubeModel.DeployRunStepCCVMBootstrap
+	case "monitoring", "wall", "wall_config", "monitoring_prepare":
+		return CubeModel.DeployRunStepMonitoringPrepare
 	case "profile", "system", "system_config", "system_profile":
 		return CubeModel.DeployRunStepSystemProfile
 	default:
@@ -312,10 +387,12 @@ func isKnownDeployRunStep(step string) bool {
 		CubeModel.DeployRunStepClusterApply,
 		CubeModel.DeployRunStepSCVMPrepare,
 		CubeModel.DeployRunStepSCVMBootstrap,
+		CubeModel.DeployRunStepRBDPrepare,
 		CubeModel.DeployRunStepStoragePrepare,
 		CubeModel.DeployRunStepLocalPrepare,
 		CubeModel.DeployRunStepCCVMPrepare,
 		CubeModel.DeployRunStepCCVMBootstrap,
+		CubeModel.DeployRunStepMonitoringPrepare,
 		CubeModel.DeployRunStepSystemProfile:
 		return true
 	default:
@@ -341,13 +418,14 @@ func runDeployRunJob(jobID string, req DeployRunRequest, steps []string, authHea
 	})
 
 	executed := map[string]bool{}
+	runtime := &deployRunRuntime{}
 	for _, step := range steps {
 		deployRunJobs.update(jobID, func(job *CubeModel.DeployRunJob) {
 			job.CurrentStep = step
 			markDeployRunStepRunning(job, step)
 		})
 
-		outcome, err := runDeployRunStep(req, step, authHeader, executed)
+		outcome, err := runDeployRunStep(req, step, authHeader, executed, runtime)
 		if err != nil {
 			outcome = deployRunStepOutcome{
 				Status:  CubeModel.DeployRunStepStatusFailed,
@@ -410,7 +488,11 @@ func markDeployRunStepFinished(job *CubeModel.DeployRunJob, step string, outcome
 	}
 }
 
-func runDeployRunStep(req DeployRunRequest, step string, authHeader string, executed map[string]bool) (deployRunStepOutcome, error) {
+type deployRunRuntime struct {
+	rbdImages []string
+}
+
+func runDeployRunStep(req DeployRunRequest, step string, authHeader string, executed map[string]bool, runtime *deployRunRuntime) (deployRunStepOutcome, error) {
 	switch step {
 	case CubeModel.DeployRunStepLicenseApply:
 		return runDeployRunLicenseApply(req, authHeader)
@@ -420,14 +502,18 @@ func runDeployRunStep(req DeployRunRequest, step string, authHeader string, exec
 		return runDeployRunSCVMPrepare(req)
 	case CubeModel.DeployRunStepSCVMBootstrap:
 		return runDeployRunSCVMBootstrap(req, authHeader, executed)
+	case CubeModel.DeployRunStepRBDPrepare:
+		return runDeployRunRBDPrepare(req, runtime)
 	case CubeModel.DeployRunStepStoragePrepare:
-		return runDeployRunStoragePrepare(req)
+		return runDeployRunStoragePrepare(req, runtime)
 	case CubeModel.DeployRunStepLocalPrepare:
 		return runDeployRunLocalPrepare(req)
 	case CubeModel.DeployRunStepCCVMPrepare:
 		return runDeployRunCCVMPrepare(req)
 	case CubeModel.DeployRunStepCCVMBootstrap:
 		return runDeployRunCCVMBootstrap(req, authHeader, executed)
+	case CubeModel.DeployRunStepMonitoringPrepare:
+		return runDeployRunMonitoringPrepare(req, executed)
 	case CubeModel.DeployRunStepSystemProfile:
 		return runDeployRunSystemProfile(req, executed)
 	default:
@@ -455,6 +541,7 @@ func runDeployRunLicenseApply(req DeployRunRequest, authHeader string) (deployRu
 	if err != nil && len(req.Licenses) == 0 && strings.TrimSpace(req.LicenseContent) == "" {
 		return deployRunStepOutcome{}, fmt.Errorf("failed to read cluster.json")
 	}
+	cfg = deployRunLicenseConfig(req, cfg)
 	licenseReq := LicenseApplyRequest{
 		Action:         "register",
 		LicenseContent: req.LicenseContent,
@@ -463,9 +550,27 @@ func runDeployRunLicenseApply(req DeployRunRequest, authHeader string) (deployRu
 	}
 	resp := runLicenseApply(licenseReq, cfg, authHeader)
 	if resp.Code != http.StatusOK {
-		return deployRunStepOutcome{Output: resp}, fmt.Errorf(firstNonEmpty(resp.Message, "license apply failed"))
+		return deployRunStepOutcome{Output: resp}, errors.New(firstNonEmpty(resp.Message, "license apply failed"))
 	}
 	return deployRunSucceeded(resp.Message, resp), nil
+}
+
+func deployRunLicenseConfig(req DeployRunRequest, current *CubeModel.ClusterConfigSection) *CubeModel.ClusterConfigSection {
+	if req.Cluster == nil || len(req.Cluster.Hosts) == 0 {
+		return current
+	}
+	var cfg CubeModel.ClusterConfigSection
+	if current != nil {
+		cfg = *current
+	}
+	cfg.Hosts = append([]CubeModel.ClusterHost(nil), req.Cluster.Hosts...)
+	if value := strings.TrimSpace(req.Cluster.Type); value != "" {
+		cfg.Type = value
+	}
+	if req.Cluster.CCVM != nil && strings.TrimSpace(req.Cluster.CCVM.IP) != "" {
+		cfg.CCVM = *req.Cluster.CCVM
+	}
+	return &cfg
 }
 
 func runDeployRunClusterApply(req DeployRunRequest) (deployRunStepOutcome, error) {
@@ -474,7 +579,7 @@ func runDeployRunClusterApply(req DeployRunRequest) (deployRunStepOutcome, error
 	}
 	resp := runClusterConfigApplyForDeploy(*req.Cluster)
 	if resp.Code != http.StatusOK {
-		return deployRunStepOutcome{Output: resp}, fmt.Errorf(firstNonEmpty(resp.Message, "cluster apply failed"))
+		return deployRunStepOutcome{Output: resp}, errors.New(firstNonEmpty(resp.Message, "cluster apply failed"))
 	}
 	return deployRunSucceeded(resp.Message, resp), nil
 }
@@ -491,8 +596,12 @@ func runDeployRunSCVMPrepare(req DeployRunRequest) (deployRunStepOutcome, error)
 		return deployRunMissingInput(req, CubeModel.DeployRunStepSCVMPrepare, "scvm_by_host required")
 	}
 
+	filter := licenseApplyHostnameFilter(req.TargetHostnames)
 	results := make([]map[string]any, 0, len(cfg.Hosts))
 	for _, host := range cfg.Hosts {
+		if len(filter) > 0 && !licenseApplyTargetMatchesFilter(licenseApplyRoleSCVM, licenseApplySCVMHostname(&host), &host, filter) {
+			continue
+		}
 		target := strings.TrimSpace(host.Ablecube)
 		if target == "" {
 			continue
@@ -509,7 +618,7 @@ func runDeployRunSCVMPrepare(req DeployRunRequest) (deployRunStepOutcome, error)
 		}
 	}
 	if len(results) == 0 {
-		return deployRunStepOutcome{}, fmt.Errorf("hosts[].ablecube required")
+		return deployRunStepOutcome{}, fmt.Errorf("SCVM prepare target not found")
 	}
 	return deployRunSucceeded("scvm prepare success", results), nil
 }
@@ -582,7 +691,11 @@ func prepareSCVMOnHost(target string, host CubeModel.ClusterHost, xmlReq SCVMXML
 		return result, fmt.Errorf("%s scvm setup failed: %s", firstNonEmpty(host.Hostname, target), firstNonEmpty(lifeResp.Message, fmt.Sprint(lifeResp.Val)))
 	}
 	scvmTarget := firstNonEmpty(host.ScvmMngt, host.Scvm)
-	health, err := waitDeployRunAPIHealth(scvmTarget)
+	health, err := waitDeployRunAPIHealthWithPolicy(
+		scvmTarget,
+		deployRunSCVMHealthAttempts,
+		deployRunSCVMHealthInterval,
+	)
 	result["api_health"] = health
 	if err != nil {
 		return result, fmt.Errorf("%s scvm api health failed: %s", firstNonEmpty(host.Hostname, scvmTarget), err.Error())
@@ -604,27 +717,138 @@ func runDeployRunSCVMBootstrap(req DeployRunRequest, authHeader string, executed
 	return bootstrapResponseToDeployOutcome(runBootstrapRole(bootstrapRequestFromDeployRun(req), cfg, licenseApplyRoleSCVM, authHeader))
 }
 
-func runDeployRunStoragePrepare(req DeployRunRequest) (deployRunStepOutcome, error) {
+func runDeployRunRBDPrepare(req DeployRunRequest, runtime *deployRunRuntime) (deployRunStepOutcome, error) {
 	cfg, err := loadClusterConfigSection()
 	if err != nil {
 		return deployRunStepOutcome{}, fmt.Errorf("failed to read cluster.json")
 	}
-	if normalizeDeployOSType(cfg.Type) == "ablestack-standalone" {
-		return deployRunSkipped("storage_prepare is not required for ablestack-standalone", nil), nil
+	if normalizeDeployOSType(cfg.Type) != "ablestack-hci-filesystem" {
+		return deployRunSkipped("rbd_prepare is required for ablestack-hci-filesystem only", nil), nil
+	}
+	if req.RBD == nil {
+		return deployRunMissingInput(req, CubeModel.DeployRunStepRBDPrepare, "rbd request required")
+	}
+
+	rbdReq := *req.RBD
+	if err := normalizeRBDManageRequest(&rbdReq, false); err != nil {
+		return deployRunStepOutcome{}, err
+	}
+	if rbdReq.Action != "create" {
+		return deployRunStepOutcome{}, fmt.Errorf("rbd_prepare supports create action only")
+	}
+	resp := runRBDManage(rbdReq, cfg)
+	if resp.Code != http.StatusOK {
+		return deployRunStepOutcome{Output: resp}, errors.New(firstNonEmpty(resp.Message, fmt.Sprint(resp.Val), "rbd prepare failed"))
+	}
+	if runtime != nil {
+		runtime.rbdImages = normalizeStringSlice(rbdManageResponseImages(resp))
+	}
+	return deployRunSucceeded(firstNonEmpty(resp.Message, "rbd prepare success"), resp), nil
+}
+
+func rbdManageResponseImages(resp RBDManageResponse) []string {
+	if values, ok := resp.Val.([]string); ok {
+		return values
+	}
+	for _, result := range resp.Results {
+		if len(result.Images) > 0 {
+			return result.Images
+		}
+	}
+	return nil
+}
+
+func runDeployRunStoragePrepare(req DeployRunRequest, runtime *deployRunRuntime) (deployRunStepOutcome, error) {
+	cfg, err := loadClusterConfigSection()
+	if err != nil {
+		return deployRunStepOutcome{}, fmt.Errorf("failed to read cluster.json")
+	}
+	osType := normalizeDeployOSType(cfg.Type)
+	if osType != "ablestack-vm" && osType != "ablestack-hci-filesystem" {
+		return deployRunSkipped("storage_prepare is not required for "+strings.TrimSpace(cfg.Type), nil), nil
 	}
 	if req.GFS == nil {
 		return deployRunMissingInput(req, CubeModel.DeployRunStepStoragePrepare, "gfs request required")
 	}
 
-	gfsReq := *req.GFS
-	if err := normalizeGFSManageRequest(&gfsReq); err != nil {
+	rbdImages := []string(nil)
+	if runtime != nil {
+		rbdImages = runtime.rbdImages
+	}
+	requests, err := buildDeployRunGFSRequests(*req.GFS, osType, rbdImages)
+	if err != nil {
 		return deployRunStepOutcome{}, err
 	}
-	resp := runGFSManage(gfsReq, cfg)
-	if resp.Code != http.StatusOK {
-		return deployRunStepOutcome{Output: resp}, fmt.Errorf(firstNonEmpty(resp.Message, fmt.Sprint(resp.Val), "storage prepare failed"))
+
+	output := map[string]any{}
+	for _, gfsReq := range requests {
+		if err := normalizeGFSManageRequest(&gfsReq); err != nil {
+			return deployRunStepOutcome{Output: output}, fmt.Errorf("%s validation failed: %w", gfsReq.Action, err)
+		}
+		resp := runGFSManage(gfsReq, cfg)
+		output[gfsReq.Action] = resp
+		if resp.Code != http.StatusOK {
+			return deployRunStepOutcome{Output: output}, fmt.Errorf("%s failed: %s", gfsReq.Action, firstNonEmpty(resp.Message, fmt.Sprint(resp.Val), "storage prepare failed"))
+		}
 	}
-	return deployRunSucceeded(firstNonEmpty(resp.Message, "storage prepare success"), resp), nil
+	return deployRunSucceeded("GFS storage prepare success", output), nil
+}
+
+func buildDeployRunGFSRequests(base GFSManageRequest, osType string, rbdImages []string) ([]GFSManageRequest, error) {
+	base.Action = "init-pcs-cluster"
+	if base.ClusterName == "" {
+		base.ClusterName = gfsManageDefaultCluster
+	}
+	if base.ClusterUser == "" {
+		base.ClusterUser = gfsManageDefaultPCSUser
+	}
+	if base.ClusterPassword == "" {
+		base.ClusterPassword = gfsManageDefaultPCSPass
+	}
+	if base.VGName == "" {
+		base.VGName = "vg_glue"
+	}
+	if base.LVName == "" {
+		base.LVName = "lv_glue"
+	}
+	if base.GFSName == "" {
+		base.GFSName = "glue-gfs"
+	}
+	if base.MountPoint == "" {
+		base.MountPoint = "/mnt/glue-gfs"
+	}
+	base.VolumeGroups = normalizeGFSManageVolumeGroups(base.VolumeGroups, base.VGName, base.LVName)
+
+	switch normalizeDeployOSType(osType) {
+	case "ablestack-hci-filesystem":
+		if len(rbdImages) == 0 {
+			return nil, fmt.Errorf("rbd_prepare did not return mapped images")
+		}
+		base.Disks = make([]string, 0, len(rbdImages))
+		for _, image := range rbdImages {
+			image = strings.Trim(strings.TrimSpace(image), "/")
+			if image != "" {
+				base.Disks = append(base.Disks, "/dev/rbd/"+image)
+			}
+		}
+	case "ablestack-vm":
+		base.Disks = normalizeStringSlice(append(base.Disks, splitCommaValues(base.Disk)...))
+	default:
+		return nil, fmt.Errorf("GFS storage is not supported for %s", osType)
+	}
+	if len(base.Disks) == 0 {
+		return nil, fmt.Errorf("gfs disks required")
+	}
+	if len(base.Stonith) == 0 {
+		return nil, fmt.Errorf("gfs stonith devices required")
+	}
+
+	initReq := base
+	stonithReq := GFSManageRequest{Action: "configure-stonith", Stonith: base.Stonith}
+	createReq := base
+	createReq.Action = "create-gfs"
+	alertReq := GFSManageRequest{Action: "set-alert"}
+	return []GFSManageRequest{initReq, stonithReq, createReq, alertReq}, nil
 }
 
 func runDeployRunLocalPrepare(req DeployRunRequest) (deployRunStepOutcome, error) {
@@ -645,7 +869,7 @@ func runDeployRunLocalPrepare(req DeployRunRequest) (deployRunStepOutcome, error
 	}
 	resp := runLocalManage(localReq)
 	if resp.Code != http.StatusOK {
-		return deployRunStepOutcome{Output: resp}, fmt.Errorf(firstNonEmpty(resp.Message, fmt.Sprint(resp.Val), "local prepare failed"))
+		return deployRunStepOutcome{Output: resp}, errors.New(firstNonEmpty(resp.Message, fmt.Sprint(resp.Val), "local prepare failed"))
 	}
 	return deployRunSucceeded(firstNonEmpty(resp.Message, "local prepare success"), resp), nil
 }
@@ -668,7 +892,7 @@ func runDeployRunCCVMPrepare(req DeployRunRequest) (deployRunStepOutcome, error)
 	cloudResp := runCCVMCloudInitForDeploy(cfg, cloudReq)
 	output["cloudinit"] = cloudResp
 	if cloudResp.Code != http.StatusOK {
-		return deployRunStepOutcome{Output: output}, fmt.Errorf(firstNonEmpty(cloudResp.Message, "ccvm cloudinit failed"))
+		return deployRunStepOutcome{Output: output}, errors.New(firstNonEmpty(cloudResp.Message, "ccvm cloudinit failed"))
 	}
 
 	if req.CCVMXML != nil {
@@ -679,7 +903,7 @@ func runDeployRunCCVMPrepare(req DeployRunRequest) (deployRunStepOutcome, error)
 		xmlResp := runCreateCCVMXML(cfg, xmlReq)
 		output["xml"] = xmlResp
 		if xmlResp.Code != http.StatusOK {
-			return deployRunStepOutcome{Output: output}, fmt.Errorf(firstNonEmpty(xmlResp.Message, fmt.Sprint(xmlResp.Val), "ccvm xml failed"))
+			return deployRunStepOutcome{Output: output}, errors.New(firstNonEmpty(xmlResp.Message, fmt.Sprint(xmlResp.Val), "ccvm xml failed"))
 		}
 	}
 
@@ -694,7 +918,7 @@ func runDeployRunCCVMPrepare(req DeployRunRequest) (deployRunStepOutcome, error)
 		lifeResp := runCCVMLifecycle(lifeReq, cfg)
 		output["lifecycle"] = lifeResp
 		if lifeResp.Code != http.StatusOK {
-			return deployRunStepOutcome{Output: output}, fmt.Errorf(firstNonEmpty(lifeResp.Message, lifeResp.Val, "ccvm lifecycle failed"))
+			return deployRunStepOutcome{Output: output}, errors.New(firstNonEmpty(lifeResp.Message, lifeResp.Val, "ccvm lifecycle failed"))
 		}
 	}
 	health, err := waitDeployRunAPIHealth(cfg.CCVM.IP)
@@ -714,7 +938,40 @@ func runDeployRunCCVMBootstrap(req DeployRunRequest, authHeader string, executed
 	if !executed[CubeModel.DeployRunStepCCVMPrepare] && !deployRunStepExplicit(req, CubeModel.DeployRunStepCCVMBootstrap) {
 		return deployRunSkipped("ccvm_bootstrap waits for ccvm_prepare or explicit selection", nil), nil
 	}
+	licenseResp := runLicenseApply(LicenseApplyRequest{
+		Action:         "register",
+		LicenseContent: req.LicenseContent,
+		Licenses:       req.Licenses,
+		Filename:       req.LicenseFilename,
+		Roles:          []string{licenseApplyRoleCCVM},
+		WaitForReady:   true,
+	}, cfg, authHeader)
+	if licenseResp.Code != http.StatusOK {
+		return deployRunStepOutcome{Output: map[string]any{"license_apply": licenseResp}}, errors.New(firstNonEmpty(licenseResp.Message, "ccvm license apply failed"))
+	}
 	return bootstrapResponseToDeployOutcome(runBootstrapRole(bootstrapRequestFromDeployRun(req), cfg, licenseApplyRoleCCVM, authHeader))
+}
+
+func runDeployRunMonitoringPrepare(req DeployRunRequest, executed map[string]bool) (deployRunStepOutcome, error) {
+	if !executed[CubeModel.DeployRunStepCCVMBootstrap] && !deployRunStepExplicit(req, CubeModel.DeployRunStepMonitoringPrepare) {
+		return deployRunSkipped("monitoring_prepare waits for ccvm_bootstrap or explicit selection", nil), nil
+	}
+	cfg, err := loadClusterConfigSection()
+	if err != nil {
+		return deployRunStepOutcome{}, fmt.Errorf("failed to read cluster.json")
+	}
+	monitoringReq := CCVMMonitoringConfigRequest{Action: "configure"}
+	if req.Monitoring != nil {
+		monitoringReq = *req.Monitoring
+		if strings.TrimSpace(monitoringReq.Action) == "" {
+			monitoringReq.Action = "configure"
+		}
+	}
+	resp := runCCVMMonitoringConfigForDeploy(monitoringReq, cfg)
+	if resp.Code != http.StatusOK {
+		return deployRunStepOutcome{Output: resp}, errors.New(firstNonEmpty(resp.Message, "monitoring prepare failed"))
+	}
+	return deployRunSucceeded(firstNonEmpty(resp.Message, "monitoring prepare success"), resp), nil
 }
 
 func runCCVMCloudInitForDeploy(cfg *CubeModel.ClusterConfigSection, req CCVMCloudInitCreateRequest) GenCloudInitResponse {
@@ -779,6 +1036,45 @@ func waitDeployRunAPIHealth(target string) (map[string]any, error) {
 	return result, fmt.Errorf("%s api health check failed after %s: %w", target, deployRunBootstrapReadyTO, lastErr)
 }
 
+func waitDeployRunAPIHealthWithPolicy(target string, maxAttempts int, interval time.Duration) (map[string]any, error) {
+	target = strings.TrimSpace(target)
+	result := map[string]any{"target": target}
+	if target == "" {
+		err := fmt.Errorf("empty target")
+		result["message"] = err.Error()
+		return result, err
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	if interval < 0 {
+		interval = 0
+	}
+
+	client := &http.Client{Timeout: deployRunHealthCheckTO}
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := callHealthTarget(client, target); err == nil {
+			result["code"] = http.StatusOK
+			result["message"] = "ok"
+			result["attempts"] = attempt
+			result["interval_seconds"] = int(interval.Seconds())
+			return result, nil
+		} else {
+			lastErr = err
+		}
+		if attempt < maxAttempts {
+			time.Sleep(interval)
+		}
+	}
+
+	result["code"] = http.StatusInternalServerError
+	result["message"] = lastErr.Error()
+	result["attempts"] = maxAttempts
+	result["interval_seconds"] = int(interval.Seconds())
+	return result, fmt.Errorf("%s api health check failed after %d attempts at %s intervals: %w", target, maxAttempts, interval, lastErr)
+}
+
 func runDeployRunSystemProfile(req DeployRunRequest, executed map[string]bool) (deployRunStepOutcome, error) {
 	if req.UpdateSystemProfile != nil && !*req.UpdateSystemProfile {
 		return deployRunSkipped("system profile update disabled", nil), nil
@@ -809,6 +1105,9 @@ func runDeployRunSystemProfile(req DeployRunRequest, executed map[string]bool) (
 	}
 	if executed[CubeModel.DeployRunStepCCVMBootstrap] {
 		flags = append(flags, resetCloudCenterSystemFlag{Depth1: "bootstrap", Depth2: "ccvm", Value: "true"})
+	}
+	if executed[CubeModel.DeployRunStepMonitoringPrepare] {
+		flags = append(flags, resetCloudCenterSystemFlag{Depth1: "bootstrap", Depth2: "wall", Value: "true"})
 	}
 	flags = dedupeDeployRunSystemFlags(flags)
 	if len(flags) == 0 {

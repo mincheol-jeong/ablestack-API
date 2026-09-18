@@ -78,6 +78,7 @@ func LicenseControl(context *gin.Context) {
 		})
 		return
 	}
+	appendAbleStackAPILog("license", "event=request_received action=%q client=%q content_type=%q has_content=%t", action, context.ClientIP(), context.ContentType(), strings.TrimSpace(req.LicenseContent) != "")
 
 	var resp LicenseResponse
 
@@ -100,6 +101,7 @@ func LicenseControl(context *gin.Context) {
 		resp, err = registerLicense(context, req.LicenseContent, req.Filename)
 	}
 	if err != nil {
+		appendAbleStackAPILog("license", "event=request_failed action=%q client=%q error=%q", action, context.ClientIP(), err.Error())
 		context.JSON(http.StatusInternalServerError, utils.HTTP500InternalServerError{
 			ErrCode: http.StatusInternalServerError,
 			Message: err.Error(),
@@ -108,6 +110,7 @@ func LicenseControl(context *gin.Context) {
 	}
 
 	if resp.Code != 200 {
+		appendAbleStackAPILog("license", "event=request_rejected action=%q client=%q code=%d", action, context.ClientIP(), resp.Code)
 		status := resp.Code
 		if status < 100 || status > 599 {
 			status = http.StatusInternalServerError
@@ -115,6 +118,7 @@ func LicenseControl(context *gin.Context) {
 		context.JSON(status, resp)
 		return
 	}
+	appendAbleStackAPILog("license", "event=request_success action=%q client=%q code=%d", action, context.ClientIP(), resp.Code)
 	context.JSON(http.StatusOK, resp)
 }
 

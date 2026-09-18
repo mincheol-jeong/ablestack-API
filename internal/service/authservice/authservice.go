@@ -1,6 +1,7 @@
 package authservice
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -20,6 +21,12 @@ import (
 	"time"
 
 	"ablecloud.io/ablestack-api/internal/service/licenseservice"
+	"github.com/openwall/yescrypt-go"
+	crypt "github.com/sergeymakinen/go-crypt"
+	_ "github.com/sergeymakinen/go-crypt/bcrypt"
+	_ "github.com/sergeymakinen/go-crypt/md5"
+	_ "github.com/sergeymakinen/go-crypt/sha256"
+	_ "github.com/sergeymakinen/go-crypt/sha512"
 )
 
 const (
@@ -319,43 +326,50 @@ func ConfigPath() string {
 }
 
 func verifyLinuxShadowPassword(username string, password string) bool {
-	payload, err := json.Marshal(map[string]string{
-		"username": username,
-		"password": password,
-	})
+	hash, err := readLinuxShadowHash("/etc/shadow", username)
 	if err != nil {
 		return false
 	}
-	const script = `
-import crypt
-import hmac
-import json
-import spwd
-import sys
+	return verifyLinuxPasswordHash(hash, password)
+}
 
-try:
-    req = json.load(sys.stdin)
-    username = req.get("username", "")
-    password = req.get("password", "")
-    entry = spwd.getspnam(username)
-    hashed = entry.sp_pwdp or ""
-    if not hashed or hashed[0] in ("!", "*"):
-        sys.exit(1)
-    candidate = crypt.crypt(password, hashed)
-    if candidate and hmac.compare_digest(candidate, hashed):
-        sys.exit(0)
-    sys.exit(1)
-except Exception:
-    sys.exit(1)
-`
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "python3", "-c", script)
-	cmd.Stdin = bytes.NewReader(payload)
-	if err := cmd.Run(); err != nil {
+func readLinuxShadowHash(path string, username string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.SplitN(scanner.Text(), ":", 3)
+		if len(fields) < 2 || fields[0] != username {
+			continue
+		}
+		hash := strings.TrimSpace(fields[1])
+		if hash == "" || strings.HasPrefix(hash, "!") || strings.HasPrefix(hash, "*") {
+			return "", fmt.Errorf("linux account is locked")
+		}
+		return hash, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("linux account not found")
+}
+
+func verifyLinuxPasswordHash(hash string, password string) bool {
+	if strings.HasPrefix(hash, "$y$") {
+		candidate, err := yescrypt.Hash([]byte(password), []byte(hash))
+		if err != nil {
+			return false
+		}
+		return subtle.ConstantTimeCompare(candidate, []byte(hash)) == 1
+	}
+	if err := crypt.Check(hash, password); err != nil {
 		return false
 	}
-	return ctx.Err() == nil
+	return true
 }
 
 func signToken(claim TokenClaim, secret string) (string, error) {

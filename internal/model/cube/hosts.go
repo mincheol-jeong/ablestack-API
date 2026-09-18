@@ -65,8 +65,8 @@ func (h *TypeHosts) RUnlock() {
 	h.mu.RUnlock()
 }
 
-func (h *TypeHosts) ApplyFrom(src TypeHosts) {
-	if h == nil {
+func (h *TypeHosts) ApplyFrom(src *TypeHosts) {
+	if h == nil || src == nil {
 		return
 	}
 	if h.mu != nil {

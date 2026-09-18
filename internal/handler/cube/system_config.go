@@ -80,6 +80,7 @@ func UpdateSystemConfig(context *gin.Context) {
 		})
 		return
 	}
+	normalizeSystemConfigConvenienceRequest(&req)
 
 	action := normalizeSystemAction(req.Action)
 	if action == "" {
@@ -238,6 +239,23 @@ func UpdateSystemConfig(context *gin.Context) {
 	}
 
 	context.JSON(http.StatusOK, SystemConfigResponse{Code: 200, Val: "ok"})
+}
+
+// normalizeSystemConfigConvenienceRequest는 UI의 완료 상태 액션을 표준 update fan-out 요청으로 변환한다.
+func normalizeSystemConfigConvenienceRequest(req *SystemConfigRequest) {
+	if req == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(req.Action)) {
+	case "gfs-configure", "gfs_configure":
+		req.Action = "update"
+		req.Option = "all"
+		req.Depth1 = "bootstrap"
+		req.Depth2 = "gfs_configure"
+		if strings.TrimSpace(req.Value) == "" {
+			req.Value = "true"
+		}
+	}
 }
 
 // normalizeSystemAction은 외부 입력 action을 내부 처리용 표준 값으로 정규화한다.

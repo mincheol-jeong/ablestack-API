@@ -15,6 +15,7 @@ if [[ -z "${VERSION:-}" ]]; then
   VERSION="${VERSION//[[:space:]]/}"
 fi
 RELEASE="${RELEASE:-1}"
+API_PORT="${API_PORT:-18090}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist/rpm}"
 RPMBUILD_DIR="${RPMBUILD_DIR:-${DIST_DIR}/rpmbuild}"
 SPEC_FILE="${ROOT_DIR}/packaging/rpm/${PACKAGE_NAME}.spec"
@@ -28,6 +29,12 @@ if [[ "$VERSION" == *-* ]]; then
   echo "VERSION must be an RPM-compatible version without '-': ${VERSION}" >&2
   exit 2
 fi
+
+if [[ ! "$API_PORT" =~ ^[0-9]+$ ]] || (( 10#$API_PORT < 1 || 10#$API_PORT > 65535 )); then
+  echo "API_PORT must be an integer between 1 and 65535: ${API_PORT}" >&2
+  exit 2
+fi
+API_PORT="$((10#$API_PORT))"
 
 if [[ ! -f "$CHANGELOG_FILE" ]]; then
   echo "missing CHANGELOG file: ${CHANGELOG_FILE}" >&2
@@ -69,6 +76,7 @@ tar -C "$ROOT_DIR" \
   --exclude='./internal/handler/cube/create_scvm_cloudinit.go' \
   --exclude='./internal/handler/cube/create_ccvm_xml.go' \
   --exclude='./internal/handler/cube/create_scvm_xml.go' \
+  --exclude='./internal/model/mold/status.go' \
   --exclude='./internal/service/controller/Neighbor.go' \
   --exclude='./internal/service/controller/config.go' \
   -cf - . | tar -C "$SOURCE_ROOT" -xf -
@@ -80,6 +88,7 @@ RPMBUILD_ARGS=(
   --define "_topdir ${RPMBUILD_DIR}"
   --define "rpm_version ${VERSION}"
   --define "rpm_release ${RELEASE}"
+  --define "api_port ${API_PORT}"
 )
 
 if [[ "${SKIP_TESTS:-0}" == "1" ]]; then

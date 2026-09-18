@@ -2,10 +2,12 @@ package cube
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,8 +33,17 @@ const (
 	gfsManageAlertLogPath     = "/var/log/pcmk_alert_file.log"
 	gfsManageAlertDetailPath  = "/var/log/pcmk_alert_detail.log"
 	gfsManageHCIFilesystem    = "ablestack-hci-filesystem"
+	gfsManageDefaultCluster   = "cloudcenter_cluster"
+	gfsManageDefaultPCSUser   = "hacluster"
+	gfsManageDefaultPCSPass   = "password"
 	gfsManageResourceCleanup  = "resource-cleanup"
 	gfsManagePrepareAlertFile = "prepare-alert-file"
+	gfsManageSetPCSPassword   = "set-cluster-password"
+	gfsManagePrepareGFSNode   = "prepare-gfs-node"
+	gfsManageClusterReadyWait = 90 * time.Second
+	gfsManageLockingSettle    = 25 * time.Second
+	gfsManageReadyPoll        = 3 * time.Second
+	gfsManageReadyChecks      = 2
 )
 
 type gfsManageTarget struct {
@@ -66,6 +77,11 @@ type gfsManageDevicePaths struct {
 	LVPaths    []string
 	MapNames   []string
 	BlockNames []string
+}
+
+type gfsManageFormatSettings struct {
+	JournalSizeMB       int
+	ResourceGroupSizeMB int
 }
 
 // GFSManage godoc
@@ -125,20 +141,28 @@ func normalizeGFSManageRequest(req *GFSManageRequest) error {
 	switch strings.ToLower(strings.TrimSpace(req.Action)) {
 	case "init-pcs-cluster", "init":
 		req.Action = "init-pcs-cluster"
+	case "create-gfs":
+		req.Action = "create-gfs"
 	case "modify-lvm-conf":
 		req.Action = "modify-lvm-conf"
 		if req.UseLVMLockd == nil {
 			value := true
 			req.UseLVMLockd = &value
 		}
+	case gfsManageSetPCSPassword:
+		req.Action = gfsManageSetPCSPassword
 	case "partprobe":
 		req.Action = "partprobe"
 	case "lvmdevices-add":
 		req.Action = "lvmdevices-add"
 	case gfsManageResourceCleanup:
 		req.Action = gfsManageResourceCleanup
+	case gfsManagePrepareGFSNode:
+		req.Action = gfsManagePrepareGFSNode
 	case "check-host":
 		req.Action = "check-host"
+	case "configure-stonith":
+		req.Action = "configure-stonith"
 	case "check-stonith":
 		req.Action = "check-stonith"
 		req.Control = strings.ToLower(strings.TrimSpace(req.Control))
@@ -173,6 +197,29 @@ func normalizeGFSManageRequest(req *GFSManageRequest) error {
 	req.LVName = strings.TrimSpace(req.LVName)
 	req.GFSName = strings.TrimSpace(req.GFSName)
 	req.MountPoint = strings.TrimSpace(req.MountPoint)
+	req.ClusterName = strings.TrimSpace(req.ClusterName)
+	req.ClusterUser = strings.TrimSpace(req.ClusterUser)
+	req.ClusterPassword = strings.TrimSpace(req.ClusterPassword)
+	if req.Action == "init-pcs-cluster" || req.Action == "create-gfs" || req.Action == gfsManageSetPCSPassword {
+		if req.ClusterName == "" {
+			req.ClusterName = gfsManageDefaultCluster
+		}
+		if req.ClusterUser == "" {
+			req.ClusterUser = gfsManageDefaultPCSUser
+		}
+		if req.ClusterPassword == "" {
+			req.ClusterPassword = gfsManageDefaultPCSPass
+		}
+		if strings.ContainsAny(req.ClusterUser, ":\x00\r\n") {
+			return fmt.Errorf("invalid cluster_user")
+		}
+		if strings.ContainsAny(req.ClusterPassword, "\x00\r\n") {
+			return fmt.Errorf("invalid cluster_password")
+		}
+		if strings.ContainsAny(req.ClusterName, "\x00\r\n") {
+			return fmt.Errorf("invalid cluster_name")
+		}
+	}
 	req.NonStopCheck = strings.ToLower(strings.TrimSpace(req.NonStopCheck))
 	req.VolumeGroups = normalizeGFSManageVolumeGroups(req.VolumeGroups, req.VGName, req.LVName)
 	req.Stonith = normalizeGFSManageStonithDevices(req.Stonith)
@@ -192,6 +239,26 @@ func normalizeGFSManageRequest(req *GFSManageRequest) error {
 	}
 	if req.Action == "check-ipmi" && len(req.Stonith) == 0 {
 		return fmt.Errorf("stonith required")
+	}
+	if req.Action == "configure-stonith" && len(req.Stonith) == 0 {
+		return fmt.Errorf("stonith required")
+	}
+	if req.Action == "create-gfs" {
+		if req.VGName == "" {
+			req.VGName = "vg_glue"
+		}
+		if req.LVName == "" {
+			req.LVName = "lv_glue"
+		}
+		if req.GFSName == "" {
+			req.GFSName = "glue-gfs"
+		}
+		if req.MountPoint == "" {
+			req.MountPoint = "/mnt/glue-gfs"
+		}
+		if len(req.Disks) == 0 {
+			return fmt.Errorf("disks required")
+		}
 	}
 	switch req.Action {
 	case "delete-gfs":
@@ -239,6 +306,11 @@ func normalizeGFSManageStonithDevices(values []GFSManageStonithDevice) []GFSMana
 		value.IPPort = strings.TrimSpace(value.IPPort)
 		value.Login = strings.TrimSpace(value.Login)
 		value.Passwd = strings.TrimSpace(value.Passwd)
+		value.Host = strings.TrimSpace(value.Host)
+		value.Hostname = strings.TrimSpace(value.Hostname)
+		if value.IPPort == "" {
+			value.IPPort = "623"
+		}
 		if value.IPAddr == "" {
 			continue
 		}
@@ -283,7 +355,7 @@ func runGFSManage(req GFSManageRequest, cfg *CubeModel.ClusterConfigSection) GFS
 		return resp
 	case "set-alert":
 		return runGFSManageSetAlert(req, cfg)
-	case "delete-gfs", "extend", "add-extend":
+	case "create-gfs", "delete-gfs", "extend", "add-extend":
 		target := selectGFSManageExecutionTarget(cfg)
 		if target.Target == "" || target.Target == "local" || isLocalTarget(target.Target) || isGFSManageLocalHostname(target.Hostname) {
 			return runGFSManageLocal(req, firstNonEmpty(target.Target, "local"), cfg)
@@ -296,13 +368,13 @@ func runGFSManage(req GFSManageRequest, cfg *CubeModel.ClusterConfigSection) GFS
 			resp.Target = target.Target
 		}
 		return resp
-	case "modify-lvm-conf", "partprobe", "lvmdevices-add", gfsManageResourceCleanup, gfsManagePrepareAlertFile:
+	case "modify-lvm-conf", gfsManageSetPCSPassword, "partprobe", "lvmdevices-add", gfsManageResourceCleanup, gfsManagePrepareAlertFile, gfsManagePrepareGFSNode:
 		return runGFSManageFanout(req, cfg)
 	case "scan", "rescan":
 		return runGFSManageFanout(req, cfg)
 	case "check-host":
 		return gfsManageOK(req, "local", gfsManageSortedHosts(cfg), nil)
-	case "check-stonith", "check-ipmi", "list-gfs":
+	case "configure-stonith", "check-stonith", "check-ipmi", "list-gfs":
 		return runGFSManageLocal(req, "local", cfg)
 	default:
 		return gfsManageError(req, "local", "unsupported action", nil)
@@ -391,6 +463,11 @@ func runGFSManageLocal(req GFSManageRequest, target string, cfg *CubeModel.Clust
 			return gfsManageError(req, target, err.Error(), nil)
 		}
 		return gfsManageOK(req, target, "Modify Lvm Conf Success", nil)
+	case gfsManageSetPCSPassword:
+		if err := setGFSManageClusterPassword(req.ClusterUser, req.ClusterPassword); err != nil {
+			return gfsManageError(req, target, err.Error(), nil)
+		}
+		return gfsManageOK(req, target, "Set Cluster Password Success", nil)
 	case "partprobe":
 		if err := runGFSManagePartprobe(req.Disks); err != nil {
 			return gfsManageError(req, target, err.Error(), nil)
@@ -411,6 +488,21 @@ func runGFSManageLocal(req GFSManageRequest, target string, cfg *CubeModel.Clust
 			return gfsManageError(req, target, err.Error(), nil)
 		}
 		return gfsManageOK(req, target, "Lvmdevices Add Success", nil)
+	case gfsManagePrepareGFSNode:
+		if cfg == nil {
+			loaded, err := loadClusterConfigSection()
+			if err == nil {
+				cfg = loaded
+			}
+		}
+		osType := ""
+		if cfg != nil {
+			osType = cfg.Type
+		}
+		if err := prepareGFSManageNode(req.Disks, req.MountPoint, osType); err != nil {
+			return gfsManageError(req, target, err.Error(), nil)
+		}
+		return gfsManageOK(req, target, "Prepare GFS Node Success", nil)
 	case gfsManageResourceCleanup:
 		_, _ = runGFSManageCommandIgnore("pcs", "resource", "cleanup")
 		return gfsManageOK(req, target, "Resource Cleanup Success", nil)
@@ -423,6 +515,19 @@ func runGFSManageLocal(req GFSManageRequest, target string, cfg *CubeModel.Clust
 			}
 		}
 		return gfsManageOK(req, target, gfsManageSortedHosts(cfg), nil)
+	case "configure-stonith":
+		if cfg == nil {
+			var err error
+			cfg, err = loadClusterConfigSection()
+			if err != nil {
+				return gfsManageError(req, target, err.Error(), nil)
+			}
+		}
+		val, err := runGFSManageConfigureStonith(req.Stonith, cfg)
+		if err != nil {
+			return gfsManageError(req, target, err.Error(), nil)
+		}
+		return gfsManageOK(req, target, val, nil)
 	case "check-stonith":
 		val, err := runGFSManageStonithControl(req.Control)
 		if err != nil {
@@ -454,6 +559,19 @@ func runGFSManageLocal(req GFSManageRequest, target string, cfg *CubeModel.Clust
 			return gfsManageError(req, target, err.Error(), nil)
 		}
 		return gfsManageOK(req, target, vgs, nil)
+	case "create-gfs":
+		if cfg == nil {
+			loaded, err := loadClusterConfigSection()
+			if err != nil {
+				return gfsManageError(req, target, err.Error(), nil)
+			}
+			cfg = loaded
+		}
+		val, err := createGFSManageDisk(req, cfg)
+		if err != nil {
+			return gfsManageError(req, target, err.Error(), nil)
+		}
+		return gfsManageOK(req, target, val, nil)
 	case "delete-gfs":
 		if cfg == nil {
 			loaded, err := loadClusterConfigSection()
@@ -521,6 +639,7 @@ func runGFSManageInitPCSCluster(req GFSManageRequest, cfg *CubeModel.ClusterConf
 		disabled := false
 		lvmReq := GFSManageRequest{Action: "modify-lvm-conf", UseLVMLockd: &disabled}
 		lvmResults := runGFSManageFanout(lvmReq, cfg).Results
+		tagGFSManageResults(lvmResults, "reset_lvm_conf")
 		steps = append(steps, lvmResults...)
 		if err := firstGFSManageResultError(lvmResults); err != nil {
 			return gfsManageError(req, target, err.Error(), steps)
@@ -538,6 +657,7 @@ func runGFSManageInitPCSCluster(req GFSManageRequest, cfg *CubeModel.ClusterConf
 
 		probeReq := GFSManageRequest{Action: "partprobe", Disks: req.Disks}
 		probeResults := runGFSManageFanout(probeReq, cfg).Results
+		tagGFSManageResults(probeResults, "partprobe")
 		steps = append(steps, probeResults...)
 		if err := firstGFSManageResultError(probeResults); err != nil {
 			return gfsManageError(req, target, err.Error(), steps)
@@ -545,10 +665,151 @@ func runGFSManageInitPCSCluster(req GFSManageRequest, cfg *CubeModel.ClusterConf
 
 		cleanupReq := GFSManageRequest{Action: gfsManageResourceCleanup}
 		cleanupResults := runGFSManageFanout(cleanupReq, cfg).Results
+		tagGFSManageResults(cleanupResults, "resource_cleanup")
 		steps = append(steps, cleanupResults...)
+		if err := firstGFSManageResultError(cleanupResults); err != nil {
+			return gfsManageError(req, target, err.Error(), steps)
+		}
 	}
 
-	return gfsManageOK(req, target, "Init PCS Cluster Success", steps)
+	enabled := true
+	lvmReq := GFSManageRequest{Action: "modify-lvm-conf", UseLVMLockd: &enabled}
+	lvmResults := runGFSManageFanout(lvmReq, cfg).Results
+	tagGFSManageResults(lvmResults, "modify_lvm_conf")
+	steps = append(steps, lvmResults...)
+	if err := firstGFSManageResultError(lvmResults); err != nil {
+		return gfsManageError(req, target, "modify_lvm_conf failed: "+err.Error(), steps)
+	}
+
+	passwordReq := GFSManageRequest{
+		Action:          gfsManageSetPCSPassword,
+		ClusterUser:     req.ClusterUser,
+		ClusterPassword: req.ClusterPassword,
+	}
+	passwordResults := runGFSManageFanout(passwordReq, cfg).Results
+	tagGFSManageResults(passwordResults, "set_cluster_password")
+	steps = append(steps, passwordResults...)
+	if err := firstGFSManageResultError(passwordResults); err != nil {
+		return gfsManageError(req, target, "set_cluster_password failed: "+err.Error(), steps)
+	}
+
+	hosts := gfsManageTargetAddresses(targets)
+	authOutput, err := authGFSManageHosts(hosts, req.ClusterUser, req.ClusterPassword)
+	authResult := gfsManageCoordinatorStepResult("auth_hosts", target, authOutput, err)
+	steps = append(steps, authResult)
+	if err != nil {
+		return gfsManageError(req, target, err.Error(), steps)
+	}
+
+	setupOutput, err := setupGFSManageCluster(req.ClusterName, hosts)
+	setupResult := gfsManageCoordinatorStepResult("setup_cluster", target, setupOutput, err)
+	steps = append(steps, setupResult)
+	if err != nil {
+		return gfsManageError(req, target, err.Error(), steps)
+	}
+
+	return gfsManageOK(req, target, map[string]any{
+		"message":      "Init PCS Cluster Success",
+		"cluster_name": req.ClusterName,
+		"hosts":        hosts,
+	}, steps)
+}
+
+func tagGFSManageResults(results []GFSManageTargetResult, step string) {
+	for index := range results {
+		results[index].Step = step
+	}
+}
+
+func gfsManageTargetAddresses(targets []gfsManageTarget) []string {
+	hosts := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if value := strings.TrimSpace(target.Target); value != "" {
+			hosts = append(hosts, value)
+		}
+	}
+	return hosts
+}
+
+func gfsManageCoordinatorStepResult(step string, target string, output any, err error) GFSManageTargetResult {
+	result := GFSManageTargetResult{
+		Step:    step,
+		Target:  firstNonEmpty(target, "local"),
+		Code:    http.StatusOK,
+		Message: "ok",
+		Val:     output,
+	}
+	if err != nil {
+		result.Code = http.StatusInternalServerError
+		result.Message = err.Error()
+	}
+	return result
+}
+
+func setGFSManageClusterPassword(username string, password string) error {
+	if _, err := runGFSManageCommand(gfsManageShortTimeout, "systemctl", "enable", "--now", "pcsd.service"); err != nil {
+		return fmt.Errorf("enable pcsd failed: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gfsManageShortTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "chpasswd")
+	cmd.Env = gfsManageCommandEnv()
+	cmd.Stdin = strings.NewReader(username + ":" + password + "\n")
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("set cluster password timed out after %s", gfsManageShortTimeout)
+	}
+	if err != nil {
+		return fmt.Errorf("set cluster password failed: %s", firstNonEmpty(strings.TrimSpace(string(output)), err.Error()))
+	}
+	return nil
+}
+
+func authGFSManageHosts(hosts []string, username string, password string) (map[string]any, error) {
+	authenticated := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		args := buildGFSManageHostAuthArgs(host, username, password)
+		out, timedOut, err := runCommandOutputWithEnv("pcs", gfsManageCommandTimeout, gfsManageCommandEnv(), args...)
+		if timedOut {
+			return map[string]any{"authenticated": authenticated}, fmt.Errorf("pcs host auth %s timed out", host)
+		}
+		if err != nil {
+			return map[string]any{"authenticated": authenticated}, fmt.Errorf("pcs host auth %s failed: %s", host, firstNonEmpty(strings.TrimSpace(out), err.Error()))
+		}
+		authenticated = append(authenticated, host)
+	}
+	return map[string]any{"authenticated": authenticated}, nil
+}
+
+func buildGFSManageHostAuthArgs(host string, username string, password string) []string {
+	return []string{"host", "auth", host, "-u", username, "-p", password}
+}
+
+func setupGFSManageCluster(clusterName string, hosts []string) (map[string]any, error) {
+	args := buildGFSManageClusterSetupArgs(clusterName, hosts)
+	if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", args...); err != nil {
+		return nil, fmt.Errorf("pcs cluster setup failed: %w", err)
+	}
+	if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", "cluster", "enable", "--all"); err != nil {
+		return nil, fmt.Errorf("pcs cluster enable failed: %w", err)
+	}
+	status, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", "cluster", "status")
+	if err != nil {
+		return nil, fmt.Errorf("pcs cluster status verification failed: %w", err)
+	}
+	return map[string]any{
+		"cluster_name": clusterName,
+		"hosts":        hosts,
+		"enabled":      true,
+		"status":       strings.TrimSpace(status),
+	}, nil
+}
+
+func buildGFSManageClusterSetupArgs(clusterName string, hosts []string) []string {
+	args := []string{"cluster", "setup", clusterName, "--start"}
+	args = append(args, hosts...)
+	return append(args, "quorum", "wait_for_all=1", "last_man_standing=1")
 }
 
 func buildGFSManageTargets(cfg *CubeModel.ClusterConfigSection) []gfsManageTarget {
@@ -793,6 +1054,232 @@ func runGFSManageLVMDevicesAdd(disks []string, osType string) error {
 	return nil
 }
 
+func prepareGFSManageNode(disks []string, mountPoint string, osType string) error {
+	for _, disk := range disks {
+		if _, err := runGFSManageCommand(gfsManageShortTimeout, "partprobe", disk); err != nil {
+			return fmt.Errorf("partprobe failed for %s: %w", disk, err)
+		}
+		partition, err := waitForGFSManagePartition(disk, osType)
+		if err != nil {
+			return err
+		}
+		if _, err := runGFSManageCommand(gfsManageShortTimeout, "lvmdevices", "--adddev", partition); err != nil {
+			return fmt.Errorf("lvmdevices add failed for %s: %w", partition, err)
+		}
+	}
+	if mountPoint == "" {
+		return nil
+	}
+	return os.MkdirAll(mountPoint, 0755)
+}
+
+func createGFSManageDisk(req GFSManageRequest, cfg *CubeModel.ClusterConfigSection) (map[string]any, error) {
+	if err := waitForGFSManageLockingReady(); err != nil {
+		return nil, fmt.Errorf("wait_pcs_ready failed: %w", err)
+	}
+
+	osType := ""
+	if cfg != nil {
+		osType = cfg.Type
+	}
+	partitions := make([]string, 0, len(req.Disks))
+	for _, disk := range req.Disks {
+		if _, err := runGFSManageCommand(
+			gfsManageCommandTimeout,
+			"parted", "-s", disk, "mklabel", "gpt", "mkpart", req.GFSName, "0%", "100%", "set", "1", "lvm", "on",
+		); err != nil {
+			return nil, fmt.Errorf("partition_create failed for %s: %w", disk, err)
+		}
+		_, _ = runGFSManageCommandIgnore("partprobe", disk)
+		partition, err := waitForGFSManagePartition(disk, osType)
+		if err != nil {
+			return nil, fmt.Errorf("partition_wait failed for %s: %w", disk, err)
+		}
+		partitions = append(partitions, partition)
+	}
+
+	prepareReq := GFSManageRequest{Action: gfsManagePrepareGFSNode, Disks: req.Disks, MountPoint: req.MountPoint}
+	prepareResults := runGFSManageFanout(prepareReq, cfg).Results
+	if err := firstGFSManageResultError(prepareResults); err != nil {
+		return nil, fmt.Errorf("prepare_gfs_nodes failed: %w", err)
+	}
+
+	for _, partition := range partitions {
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pvcreate", "-ff", "--yes", partition); err != nil {
+			return nil, fmt.Errorf("pvcreate failed for %s: %w", partition, err)
+		}
+	}
+	vgArgs := append([]string{"--yes", "--shared", req.VGName}, partitions...)
+	if _, err := runGFSManageCommand(gfsManageCommandTimeout, "vgcreate", vgArgs...); err != nil {
+		return nil, fmt.Errorf("vgcreate failed: %w", err)
+	}
+	if _, err := runGFSManageCommand(
+		gfsManageCommandTimeout,
+		"lvcreate", "--yes", "--activate", "sy", "-l", "+100%FREE", "-n", req.LVName, req.VGName,
+	); err != nil {
+		return nil, fmt.Errorf("lvcreate failed: %w", err)
+	}
+
+	lvPath := "/dev/" + req.VGName + "/" + req.LVName
+	journalCount := gfsManageJournalCount(cfg)
+	mkfsArgs, formatSettings, err := buildGFSManageMkfsArgs(req, cfg, lvPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := runGFSManageCommand(
+		gfsManageCommandTimeout,
+		"mkfs.gfs2", mkfsArgs...,
+	); err != nil {
+		return nil, fmt.Errorf("mkfs_gfs2 failed: %w", err)
+	}
+
+	for index, args := range buildGFSManageResourceCommands(req, lvPath) {
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", args...); err != nil {
+			return nil, fmt.Errorf("pcs_resource_create[%d] failed: %w", index+1, err)
+		}
+	}
+	_, _ = runGFSManageCommandIgnore("pcs", "resource", "cleanup")
+
+	return map[string]any{
+		"message":                "Create GFS Success",
+		"cluster_name":           req.ClusterName,
+		"gfs_name":               req.GFSName,
+		"mount_point":            req.MountPoint,
+		"vg_name":                req.VGName,
+		"lv_name":                req.LVName,
+		"lv_path":                lvPath,
+		"journals":               journalCount,
+		"journal_size_mb":        formatSettings.JournalSizeMB,
+		"resource_group_size_mb": formatSettings.ResourceGroupSizeMB,
+		"partitions":             partitions,
+		"prepare_nodes":          prepareResults,
+	}, nil
+}
+
+func buildGFSManageMkfsArgs(req GFSManageRequest, cfg *CubeModel.ClusterConfigSection, lvPath string) ([]string, gfsManageFormatSettings, error) {
+	settings, err := resolveGFSManageFormatSettings(cfg)
+	if err != nil {
+		return nil, gfsManageFormatSettings{}, err
+	}
+	args := []string{
+		fmt.Sprintf("-j%d", gfsManageJournalCount(cfg)),
+		"-J", fmt.Sprint(settings.JournalSizeMB),
+		"-r", fmt.Sprint(settings.ResourceGroupSizeMB),
+		"-p", "lock_dlm",
+		"-t", req.ClusterName + ":" + req.GFSName,
+		lvPath, "-O", "-K", "-q",
+	}
+	return args, settings, nil
+}
+
+func resolveGFSManageFormatSettings(cfg *CubeModel.ClusterConfigSection) (gfsManageFormatSettings, error) {
+	settings := gfsManageFormatSettings{
+		JournalSizeMB:       CubeModel.GFSDefaultJournalSizeMB,
+		ResourceGroupSizeMB: CubeModel.GFSDefaultResourceGroupSizeMB,
+	}
+	if cfg != nil {
+		if cfg.GFS.JournalSizeMB != 0 {
+			settings.JournalSizeMB = cfg.GFS.JournalSizeMB
+		}
+		if cfg.GFS.ResourceGroupSizeMB != 0 {
+			settings.ResourceGroupSizeMB = cfg.GFS.ResourceGroupSizeMB
+		}
+	}
+	if err := validateGFSManagePowerOfTwoSize(
+		"clusterConfig.gfs.journal_size_mb",
+		settings.JournalSizeMB,
+		CubeModel.GFSMinJournalSizeMB,
+		CubeModel.GFSMaxJournalSizeMB,
+	); err != nil {
+		return gfsManageFormatSettings{}, err
+	}
+	if err := validateGFSManagePowerOfTwoSize(
+		"clusterConfig.gfs.resource_group_size_mb",
+		settings.ResourceGroupSizeMB,
+		CubeModel.GFSMinResourceGroupSizeMB,
+		CubeModel.GFSMaxResourceGroupSizeMB,
+	); err != nil {
+		return gfsManageFormatSettings{}, err
+	}
+	return settings, nil
+}
+
+func validateGFSManagePowerOfTwoSize(name string, value int, minimum int, maximum int) error {
+	if value < minimum || value > maximum || value&(value-1) != 0 {
+		return fmt.Errorf("%s must be a power of two between %dMB and %dMB", name, minimum, maximum)
+	}
+	return nil
+}
+
+func gfsManageJournalCount(cfg *CubeModel.ClusterConfigSection) int {
+	return len(buildGFSManageTargets(cfg)) + 1
+}
+
+func waitForGFSManageLockingReady() error {
+	startedAt := time.Now()
+	deadline := startedAt.Add(gfsManageClusterReadyWait)
+	lastStatus := ""
+	consecutiveReady := 0
+	for {
+		status, err := runGFSManageCommand(gfsManageShortTimeout, "pcs", "status")
+		lastStatus = strings.TrimSpace(status)
+		if err == nil && gfsManageCloneStatusReady(lastStatus) {
+			consecutiveReady++
+			if time.Since(startedAt) >= gfsManageLockingSettle && consecutiveReady >= gfsManageReadyChecks {
+				return nil
+			}
+		} else {
+			consecutiveReady = 0
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("GFS clone resources not ready within %s: %s", gfsManageClusterReadyWait, lastStatus)
+		}
+		time.Sleep(gfsManageReadyPoll)
+	}
+}
+
+func gfsManageCloneStatusReady(status string) bool {
+	statusLower := strings.ToLower(status)
+	if !strings.Contains(statusLower, "glue-locking-clone") {
+		return false
+	}
+	for _, resource := range []string{"glue-locking-clone", "glue-gfs-clone", "glue-gfs_res-clone"} {
+		section, found := gfsManageCloneStatusSection(statusLower, resource)
+		if found && strings.Contains(section, "stopped") {
+			return false
+		}
+	}
+	return true
+}
+
+func gfsManageCloneStatusSection(statusLower string, resource string) (string, bool) {
+	start := strings.Index(statusLower, resource)
+	if start < 0 {
+		return "", false
+	}
+	section := statusLower[start:]
+	for _, boundary := range []string{"\n- clone set:", "\nclone set:", "\nfailed resource actions:", "\ndaemon status:"} {
+		if next := strings.Index(section[1:], boundary); next >= 0 {
+			section = section[:next+1]
+		}
+	}
+	return section, true
+}
+
+func buildGFSManageResourceCommands(req GFSManageRequest, lvPath string) [][]string {
+	lvmResource := req.GFSName + "_res"
+	return [][]string{
+		{"resource", "create", lvmResource, "--group", req.GFSName + "-group", "ocf:heartbeat:LVM-activate", "lvname=" + req.LVName, "vgname=" + req.VGName, "activation_mode=shared", "vg_access_mode=lvmlockd"},
+		{"resource", "clone", lvmResource, "interleave=true"},
+		{"constraint", "order", "start", "glue-locking-clone", "then", lvmResource + "-clone"},
+		{"constraint", "colocation", "add", lvmResource + "-clone", "with", "glue-locking-clone"},
+		{"resource", "create", req.GFSName, "--group", req.GFSName + "-group", "ocf:heartbeat:Filesystem", "device=" + lvPath, "directory=" + req.MountPoint, "fstype=gfs2", "options=noatime", "op", "monitor", "timeout=120s", "interval=10s", "op", "start", "timeout=80s", "op", "stop", "timeout=80s", "on-fail=fence"},
+		{"resource", "clone", req.GFSName, "interleave=true"},
+		{"constraint", "order", "start", lvmResource + "-clone", "then", req.GFSName + "-clone"},
+		{"constraint", "colocation", "add", lvmResource + "-clone", "with", req.GFSName + "-clone"},
+	}
+}
+
 func listGFSManageLocalDisks() []string {
 	out, timedOut, err := runCommandOutputWithEnv("lsblk", gfsManageShortTimeout, gfsManageCommandEnv(), "-r", "-n", "-o", "NAME,TYPE", "-d")
 	if timedOut || err != nil {
@@ -842,6 +1329,124 @@ func runGFSManageStonithControl(control string) (any, error) {
 		}
 	}
 	return "Stonith Pcs Cluster Success", nil
+}
+
+func runGFSManageConfigureStonith(devices []GFSManageStonithDevice, cfg *CubeModel.ClusterConfigSection) (any, error) {
+	clusterStatus, err := runGFSManageCommand(gfsManageShortTimeout, "pcs", "cluster", "status")
+	if err != nil {
+		return nil, fmt.Errorf("PCS cluster is not ready; run init-pcs-cluster before configure-stonith: %w", err)
+	}
+
+	devices, err = resolveGFSManageStonithDevices(devices, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	status, _ := runGFSManageCommand(gfsManageShortTimeout, "pcs", "stonith", "status")
+	existing := map[string]struct{}{}
+	for _, resourceID := range parseGFSManageStonithResourceIDs(status) {
+		existing[resourceID] = struct{}{}
+	}
+
+	results := make([]map[string]any, 0, len(devices))
+	for _, device := range devices {
+		resourceID := "fence-" + device.Hostname
+		action := "create"
+		_, exists := existing[resourceID]
+		if exists {
+			action = "update"
+		}
+		args := buildGFSManageStonithCommand(device, exists)
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", args...); err != nil {
+			return results, err
+		}
+		_, _ = runGFSManageCommandIgnore("pcs", "constraint", "location", resourceID, "avoids", device.Host)
+		results = append(results, map[string]any{
+			"resource": resourceID,
+			"host":     device.Host,
+			"ipaddr":   device.IPAddr,
+			"action":   action,
+		})
+	}
+
+	for _, args := range [][]string{
+		{"property", "set", "stonith-enabled=true"},
+		{"property", "set", "stonith-action=reboot"},
+	} {
+		if _, err := runGFSManageCommand(gfsManageShortTimeout, "pcs", args...); err != nil {
+			return results, err
+		}
+	}
+	lockingCommands := [][]string{
+		{"resource", "create", "glue-dlm", "--group", "glue-locking", "ocf:pacemaker:controld", "op", "monitor", "interval=45s", "on-fail=fence"},
+		{"resource", "create", "glue-lvmlockd", "--group", "glue-locking", "ocf:heartbeat:lvmlockd", "op", "monitor", "interval=45s", "on-fail=fence"},
+		{"resource", "clone", "glue-locking", "interleave=true"},
+	}
+	for _, args := range lockingCommands {
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pcs", args...); err != nil {
+			return results, fmt.Errorf("configure locking resource failed: %w", err)
+		}
+	}
+
+	return map[string]any{
+		"message":       "Configure Stonith Devices Success",
+		"stonithAction": "reboot",
+		"clusterStatus": strings.TrimSpace(clusterStatus),
+		"devices":       results,
+	}, nil
+}
+
+func buildGFSManageStonithCommand(device GFSManageStonithDevice, update bool) []string {
+	action := "create"
+	args := []string{"stonith", action, "fence-" + device.Hostname, "fence_ipmilan"}
+	if update {
+		action = "update"
+		args = []string{"stonith", action, "fence-" + device.Hostname}
+	}
+	return append(args,
+		"delay=10",
+		"ip="+device.IPAddr,
+		"ipport="+device.IPPort,
+		"lanplus=1",
+		"method=onoff",
+		"username="+device.Login,
+		"password="+device.Passwd,
+		"pcmk_host_list="+device.Host,
+		"pcmk_off_action=off",
+		"pcmk_reboot_action=reboot",
+		"debug_file=/var/log/stonith.log",
+	)
+}
+
+func resolveGFSManageStonithDevices(devices []GFSManageStonithDevice, cfg *CubeModel.ClusterConfigSection) ([]GFSManageStonithDevice, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("clusterConfig required")
+	}
+	out := append([]GFSManageStonithDevice(nil), devices...)
+	for index := range out {
+		if index < len(cfg.Hosts) {
+			host := cfg.Hosts[index]
+			if out[index].Host == "" {
+				out[index].Host = firstNonEmpty(host.Ablecube, host.AblecubePn)
+			}
+			if out[index].Hostname == "" {
+				out[index].Hostname = strings.TrimSpace(host.Hostname)
+			}
+		}
+		if out[index].Host == "" {
+			return nil, fmt.Errorf("stonith[%d].host required", index)
+		}
+		if out[index].Hostname == "" {
+			return nil, fmt.Errorf("stonith[%d].hostname required", index)
+		}
+		if strings.ContainsAny(out[index].Hostname, " \t\r\n/") {
+			return nil, fmt.Errorf("stonith[%d].hostname is invalid", index)
+		}
+		if out[index].Login == "" || out[index].Passwd == "" {
+			return nil, fmt.Errorf("stonith[%d] login and passwd required", index)
+		}
+	}
+	return out, nil
 }
 
 func parseGFSManageStonithResourceIDs(output string) []string {
@@ -965,6 +1570,11 @@ func listGFSManageVolumeGroups() ([]map[string]string, error) {
 }
 
 func deleteGFSManageDisk(req GFSManageRequest, cfg *CubeModel.ClusterConfigSection) error {
+	paths, err := collectGFSManageDevicePaths(req.VGName, req.LVName, "")
+	if err != nil {
+		return fmt.Errorf("resolve GFS delete paths failed: %w", err)
+	}
+
 	_, _ = runGFSManageCommand(gfsManageCommandTimeout, "pcs", "resource", "disable", req.GFSName)
 	_, _ = runGFSManageCommand(gfsManageCommandTimeout, "pcs", "resource", "disable", req.GFSName+"_res")
 	time.Sleep(8 * time.Second)
@@ -976,11 +1586,31 @@ func deleteGFSManageDisk(req GFSManageRequest, cfg *CubeModel.ClusterConfigSecti
 	if err := cleanupGFSManageVolumeGroup(GFSManageVolumeGroup{VGName: req.VGName, LVName: req.LVName}); err != nil {
 		return err
 	}
-
-	for _, disk := range req.Disks {
-		cleanupGFSManageDisk(disk, "")
+	if err := removeGFSManagePVsAndPartitions(paths.Partitions, paths.Disks); err != nil {
+		return err
 	}
-	return fanoutGFSManagePartprobe(req.Disks, cfg)
+	return fanoutGFSManagePartprobe(paths.Disks, cfg)
+}
+
+func removeGFSManagePVsAndPartitions(partitions []string, disks []string) error {
+	partitions = normalizeStringSlice(partitions)
+	disks = normalizeStringSlice(disks)
+	if len(partitions) == 0 || len(disks) == 0 {
+		return fmt.Errorf("GFS PV and disk paths are required")
+	}
+	for _, partition := range partitions {
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "pvremove", "-ff", "--yes", partition); err != nil {
+			return fmt.Errorf("pvremove failed for %s: %w", partition, err)
+		}
+		_, _ = runGFSManageCommandIgnore("lvmdevices", "--deldev", partition)
+	}
+	for _, disk := range disks {
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "parted", "-s", disk, "rm", "1"); err != nil {
+			return fmt.Errorf("partition delete failed for %s: %w", disk, err)
+		}
+		_, _ = runGFSManageCommandIgnore("partprobe", disk)
+	}
+	return nil
 }
 
 func scanGFSManageSCSIHosts() error {
@@ -1003,10 +1633,17 @@ func rescanGFSManageDisk(vgName string, lvName string) error {
 	}
 	for _, blockName := range paths.BlockNames {
 		rescanPath := filepath.Join("/sys/block", blockName, "device", "rescan")
-		_ = os.WriteFile(rescanPath, []byte("1"), 0200)
+		if err := os.WriteFile(rescanPath, []byte("1"), 0200); err != nil {
+			return fmt.Errorf("SCSI rescan failed for %s: %w", blockName, err)
+		}
 	}
 	for _, mapName := range paths.MapNames {
-		_, _ = runGFSManageCommand(gfsManageShortTimeout, "multipathd", "resize", "map", mapName)
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "multipathd", "resize", "map", mapName); err != nil {
+			return fmt.Errorf("multipath resize failed for %s: %w", mapName, err)
+		}
+	}
+	if _, err := runGFSManageCommand(gfsManageShortTimeout, "udevadm", "settle"); err != nil {
+		return fmt.Errorf("udev settle after multipath resize failed: %w", err)
 	}
 	return nil
 }
@@ -1021,12 +1658,25 @@ func extendGFSManageDisk(req GFSManageRequest, cfg *CubeModel.ClusterConfigSecti
 		}()
 	}
 
+	rescanReq := GFSManageRequest{
+		Action:     "rescan",
+		VGName:     req.VGName,
+		LVName:     req.LVName,
+		MountPoint: req.MountPoint,
+	}
+	rescanResp := runGFSManageFanout(rescanReq, cfg)
+	if rescanResp.Code != http.StatusOK {
+		return fmt.Errorf("rescan multipath devices failed: %s", firstNonEmpty(rescanResp.Message, fmt.Sprint(rescanResp.Val)))
+	}
+
 	paths, err := collectGFSManageDevicePaths(req.VGName, req.LVName, "")
 	if err != nil {
 		return err
 	}
 	for _, disk := range paths.Disks {
-		_, _ = runGFSManageCommand(gfsManageCommandTimeout, "parted", "-s", disk, "resizepart", "1", "100%", "-f")
+		if _, err := runGFSManageCommand(gfsManageCommandTimeout, "parted", "-s", disk, "resizepart", "1", "100%", "-f"); err != nil {
+			return fmt.Errorf("partition resize failed for %s: %w", disk, err)
+		}
 	}
 	if err := fanoutGFSManagePartprobe(paths.Disks, cfg); err != nil {
 		return err
@@ -1141,7 +1791,7 @@ func collectGFSManageDevicePaths(vgName string, lvName string, osType string) (g
 	return result, nil
 }
 
-func appendGFSManageAncestorPaths(result gfsManageDevicePaths, ancestors []gfsManageBlockDevice, osType string) gfsManageDevicePaths {
+func appendGFSManageAncestorPaths(result gfsManageDevicePaths, ancestors []gfsManageBlockDevice, _ string) gfsManageDevicePaths {
 	if len(ancestors) == 0 {
 		return result
 	}
@@ -1154,11 +1804,7 @@ func appendGFSManageAncestorPaths(result gfsManageDevicePaths, ancestors []gfsMa
 		diskPath := firstNonEmpty(mpath.Path, root.Path)
 		result.Disks = append(result.Disks, diskPath)
 		result.MapNames = append(result.MapNames, mpath.Name)
-		if strings.EqualFold(osType, gfsManageHCIFilesystem) {
-			result.Partitions = append(result.Partitions, diskPath)
-		} else {
-			result.Partitions = append(result.Partitions, diskPath+"1")
-		}
+		result.Partitions = append(result.Partitions, firstNonEmpty(parent.Path, "/dev/"+parent.Name, diskPath))
 		return result
 	}
 	result.Disks = append(result.Disks, firstNonEmpty(root.Path, "/dev/"+root.Name))
@@ -1169,7 +1815,8 @@ func appendGFSManageAncestorPaths(result gfsManageDevicePaths, ancestors []gfsMa
 func nearestGFSManageMultipathAncestor(ancestors []gfsManageBlockDevice) (gfsManageBlockDevice, bool) {
 	for i := len(ancestors) - 1; i >= 0; i-- {
 		node := ancestors[i]
-		if strings.EqualFold(node.Type, "mpath") || strings.Contains(strings.ToLower(node.Name), "mpath") {
+		if strings.EqualFold(node.Type, "mpath") ||
+			(!strings.EqualFold(node.Type, "part") && strings.Contains(strings.ToLower(node.Name), "mpath")) {
 			return node, true
 		}
 	}

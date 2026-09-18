@@ -22,11 +22,12 @@ type CLVMManageRequest struct {
 // CLVMManageDisk는 CLVM PV 목록 항목이다.
 // @name CLVMManageDisk
 type CLVMManageDisk struct {
-	VGName string `json:"vg_name" example:"vg_clvm01"`
-	PVName string `json:"pv_name" example:"/dev/sdb1"`
-	PVSize string `json:"pv_size" example:"100.00GB"`
-	WWN    string `json:"wwn" example:"0x600..."`
-	DiskID string `json:"disk_id" example:"/dev/disk/by-id/wwn-0x600...-part1"`
+	VGName   string `json:"vg_name" example:"vg_clvm01"`
+	PVName   string `json:"pv_name" example:"/dev/sdb1"`
+	PVSize   string `json:"pv_size" example:"100.00GB"`
+	UUID     string `json:"uuid" example:"3600140510763a8bd9247d4f6ad8460de"`
+	PathMode string `json:"path_mode" example:"multipath"`
+	DiskID   string `json:"disk_id" example:"/dev/disk/by-id/wwn-0x600...-part1"`
 }
 
 // CLVMManageResponse는 CLVM 디스크 관리 결과이다.

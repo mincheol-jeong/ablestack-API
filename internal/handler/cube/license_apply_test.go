@@ -3,9 +3,31 @@ package cube
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	CubeModel "ablecloud.io/ablestack-api/internal/model/cube"
 )
+
+func TestCCVMLicenseReadyPolicy(t *testing.T) {
+	if ccvmLicenseReadyInterval != 30*time.Second {
+		t.Fatalf("ready interval = %s", ccvmLicenseReadyInterval)
+	}
+	if ccvmLicenseReadyAttempts != 6 {
+		t.Fatalf("ready attempts = %d", ccvmLicenseReadyAttempts)
+	}
+}
+
+func TestCCVMLicensePCSReadyRequiresStartedNode(t *testing.T) {
+	if !ccvmLicensePCSReady(ccvmSecondaryResizePCSStatusValue{Role: "Started", Started: "ablecube13-2"}) {
+		t.Fatal("started cloudcenter_res should be ready")
+	}
+	if ccvmLicensePCSReady(ccvmSecondaryResizePCSStatusValue{Role: "Started"}) {
+		t.Fatal("cloudcenter_res without a started node must not be ready")
+	}
+	if ccvmLicensePCSReady(ccvmSecondaryResizePCSStatusValue{Role: "Stopped", Started: "ablecube13-2"}) {
+		t.Fatal("stopped cloudcenter_res must not be ready")
+	}
+}
 
 func TestBuildLicenseApplyTargetsDefaultsToAblecube(t *testing.T) {
 	cfg := licenseApplyTestClusterConfig()

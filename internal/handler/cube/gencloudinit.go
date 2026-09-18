@@ -196,7 +196,7 @@ func buildGenCloudInitUserData(req GenCloudInitRequest, cfg *CubeModel.ClusterCo
 	userData := genCloudInitBaseUserData(pubKey, privKey, hosts, isGenCloudInitHCI(cfg))
 	switch req.Type {
 	case "ccvm":
-		if err := appendGenCloudInitCCVMFiles(userData); err != nil {
+		if err := appendGenCloudInitCCVMFiles(userData, pubKey, privKey); err != nil {
 			return nil, err
 		}
 	case "scvm":
@@ -264,7 +264,9 @@ func genCloudInitBaseUserData(pubKey string, privKey string, hosts string, hci b
 	}
 }
 
-func appendGenCloudInitCCVMFiles(userData map[string]any) error {
+func appendGenCloudInitCCVMFiles(userData map[string]any, pubKey string, privKey string) error {
+	appendGenCloudInitManagementSSHFiles(userData, pubKey, privKey)
+	appendGenCloudInitCCVMRunCommands(userData)
 	if err := appendGenCloudInitPluginFile(userData, "/usr/local/sbin/security_patch.sh", "root:root", "0755", "shell/host/security_patch.sh", "shell/security_patch.sh"); err != nil {
 		return err
 	}
@@ -272,6 +274,23 @@ func appendGenCloudInitCCVMFiles(userData map[string]any) error {
 		return err
 	}
 	return appendGenCloudInitPluginFile(userData, resolveAbleStackPropertyFile("cluster.json"), "root:root", "0600", "properties/cluster.json")
+}
+
+func appendGenCloudInitCCVMRunCommands(userData map[string]any) {
+	apiPort := configuredAPIPort()
+	userData["runcmd"] = [][]string{
+		{"/bin/bash", "-lc", fmt.Sprintf("if command -v firewall-cmd >/dev/null 2>&1; then systemctl enable --now firewalld.service >/dev/null 2>&1 || true; firewall-cmd --permanent --add-port=%s/tcp >/dev/null 2>&1 || true; firewall-cmd --add-port=%s/tcp >/dev/null 2>&1 || true; fi", apiPort, apiPort)},
+		{"/usr/bin/systemctl", "enable", "--now", "ablestack-api.service"},
+	}
+}
+
+func appendGenCloudInitManagementSSHFiles(userData map[string]any, pubKey string, privKey string) {
+	writeFiles, _ := userData["write_files"].([]map[string]any)
+	writeFiles = append(writeFiles,
+		genCloudInitWriteFile("/var/cloudstack/management/.ssh/id_rsa.pub", "cloud:cloud", "0644", pubKey),
+		genCloudInitWriteFile("/var/cloudstack/management/.ssh/id_rsa", "cloud:cloud", "0600", privKey),
+	)
+	userData["write_files"] = writeFiles
 }
 
 func appendGenCloudInitSCVMFiles(userData map[string]any, hci bool) error {

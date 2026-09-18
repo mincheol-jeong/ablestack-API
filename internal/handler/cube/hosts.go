@@ -93,8 +93,8 @@ func parseHostsEntries(content []byte) []TypeHost {
 }
 
 // buildHostsResponse는 엔트리를 네트워크/역할 기준으로 분류한 최종 응답 구조를 만든다.
-func buildHostsResponse(entries []TypeHost) TypeHosts {
-	result := TypeHosts{}
+func buildHostsResponse(entries []TypeHost) *TypeHosts {
+	result := &TypeHosts{}
 
 	for _, entry := range entries {
 		if isLocalhostEntry(entry) {

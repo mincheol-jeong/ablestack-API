@@ -15,6 +15,12 @@
             "hostname2": "",
             "hostname3": ""
         },
+        "gfs": {
+            "journal_size_mb": 512,
+            "journal_size_description": "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 8MB~1024MB입니다. 예: 128MB, 256MB, 512MB",
+            "resource_group_size_mb": 1024,
+            "resource_group_size_description": "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 32MB~2048MB입니다."
+        },
         "hosts": [
             {
                 "index": "",

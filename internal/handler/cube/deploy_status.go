@@ -18,6 +18,8 @@ type DeployStatusResponse = CubeModel.DeployStatusResponse
 type DeployStatusData = CubeModel.DeployStatusData
 type DeployStatusRaw = CubeModel.DeployStatusRaw
 type DeployStatusWarning = CubeModel.DeployStatusWarning
+type DeployPollingTarget = CubeModel.DeployPollingTarget
+type DeployPollingPolicy = CubeModel.DeployPollingPolicy
 
 const deployStatusTTL = 5 * time.Second
 
@@ -214,6 +216,13 @@ func evaluateVMDeployStatus(data DeployStatusData, cfg *CubeModel.ClusterConfigS
 
 	data.Raw.CCVMStatus = collectDeployCCVMStatus(cfg)
 
+	if !deployFlagTrue(data.Raw.CCVMBootstrapStatus) {
+		if !isDeployVMRunning(data.Raw.CCVMStatus) {
+			return withDeployStage(data, CubeModel.DeployStageCloudVMDeploy, "cloud_vm_not_deployed", CubeModel.DeployActionDownloadConfigFile, CubeModel.DeployActionDeployCloudVM)
+		}
+		return withDeployStage(data, CubeModel.DeployStageCloudVMConfigure, "cloud_vm_not_configured", CubeModel.DeployActionConfigureCloudVM)
+	}
+
 	if !deployFlagTrue(data.Raw.WallMonitoringStatus) {
 		data.Raw.CloudClusterStatus = collectDeployCloudClusterStatus(cfg)
 		if data.Raw.CloudClusterStatus == CubeModel.DeployRuntimeHealthErrCluster || data.Raw.CloudClusterStatus == CubeModel.DeployRuntimeHealthErr {
@@ -222,13 +231,6 @@ func evaluateVMDeployStatus(data DeployStatusData, cfg *CubeModel.ClusterConfigS
 		if data.Raw.CloudClusterStatus == CubeModel.DeployRuntimeHealthErrResource || data.Raw.CloudClusterStatus == CubeModel.DeployRuntimeUnknown {
 			return withDeployStage(data, CubeModel.DeployStageCloudResource, "cloud_resource_not_configured", CubeModel.DeployActionConfigureResource)
 		}
-	}
-
-	if !deployFlagTrue(data.Raw.CCVMBootstrapStatus) {
-		if !isDeployVMRunning(data.Raw.CCVMStatus) {
-			return withDeployStage(data, CubeModel.DeployStageCloudVMDeploy, "cloud_vm_not_deployed", CubeModel.DeployActionDownloadConfigFile, CubeModel.DeployActionDeployCloudVM)
-		}
-		return withDeployStage(data, CubeModel.DeployStageCloudVMConfigure, "cloud_vm_not_configured", CubeModel.DeployActionConfigureCloudVM)
 	}
 
 	if !deployFlagTrue(data.Raw.WallMonitoringStatus) {
@@ -296,7 +298,80 @@ func withDeployStage(data DeployStatusData, stage string, messageKey string, act
 	} else {
 		data.Severity = CubeModel.DeploySeverityWarning
 	}
+	data.Polling = buildDeployPollingPolicy(data)
 	return data
+}
+
+func buildDeployPollingPolicy(data DeployStatusData) DeployPollingPolicy {
+	disabled := func(reason string) DeployPollingTarget {
+		return DeployPollingTarget{Enabled: false, Reason: reason}
+	}
+	enabled := func(reason string) DeployPollingTarget {
+		return DeployPollingTarget{Enabled: true, Reason: reason}
+	}
+
+	policy := DeployPollingPolicy{
+		StorageVM:      disabled("storage VM status is not applicable to this product"),
+		StorageCluster: disabled("storage cluster status is not applicable to this product"),
+		GFSResource:    disabled("GFS resource status is not applicable to this product"),
+		GFSDisk:        disabled("GFS disk status is not applicable to this product"),
+		CloudVM:        disabled("cloud center VM has not been confirmed running"),
+		CloudCluster:   disabled("cloud center cluster prerequisite is not complete"),
+		Mold:           disabled("cloud center bootstrap is not complete"),
+	}
+
+	if !deployFlagTrue(data.Raw.CCFGStatus) {
+		reason := "cluster configuration is not complete"
+		policy.StorageVM = disabled(reason)
+		policy.StorageCluster = disabled(reason)
+		policy.GFSResource = disabled(reason)
+		policy.GFSDisk = disabled(reason)
+		policy.CloudVM = disabled(reason)
+		policy.CloudCluster = disabled(reason)
+		policy.Mold = disabled(reason)
+		return policy
+	}
+
+	osType := normalizeDeployOSType(data.OSType)
+	if isDeployHCIType(osType) {
+		if isDeployVMRunning(data.Raw.SCVMStatus) || deployFlagTrue(data.Raw.SCVMBootstrapStatus) {
+			policy.StorageVM = enabled("storage VM has been confirmed running")
+		} else {
+			policy.StorageVM = disabled("storage VM has not been confirmed running")
+		}
+		if deployFlagTrue(data.Raw.SCVMBootstrapStatus) {
+			policy.StorageCluster = enabled("storage VM bootstrap is complete")
+		} else {
+			policy.StorageCluster = disabled("storage VM bootstrap is not complete")
+		}
+	}
+
+	if osType == "ablestack-vm" || osType == "ablestack-hci-filesystem" {
+		if deployFlagTrue(data.Raw.GFSConfigure) {
+			policy.GFSResource = enabled("GFS configuration is complete")
+			policy.GFSDisk = enabled("GFS configuration is complete")
+		} else {
+			policy.GFSResource = disabled("GFS configuration is not complete")
+			policy.GFSDisk = disabled("GFS configuration is not complete")
+		}
+	}
+
+	cloudVMReady := isDeployVMRunning(data.Raw.CCVMStatus) || deployFlagTrue(data.Raw.CCVMBootstrapStatus)
+	if cloudVMReady {
+		policy.CloudVM = enabled("cloud center VM has been confirmed running")
+	}
+
+	switch {
+	case osType == "ablestack-vm" && deployFlagTrue(data.Raw.GFSConfigure):
+		policy.CloudCluster = enabled("GFS configuration is complete")
+	case isDeployHCIType(osType) && cloudVMReady:
+		policy.CloudCluster = enabled("cloud center VM has been confirmed running")
+	}
+	if deployFlagTrue(data.Raw.CCVMBootstrapStatus) {
+		policy.Mold = enabled("cloud center bootstrap is complete")
+	}
+
+	return policy
 }
 
 func deployStageOrder(stage string) int {

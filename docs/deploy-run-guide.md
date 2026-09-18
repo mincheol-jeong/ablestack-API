@@ -7,7 +7,7 @@
 기준 URL:
 
 ```text
-http://<master-ablecube-ip>:8090/api/v1
+http://<master-ablecube-ip>:18090/api/v1
 ```
 
 | Method | Endpoint | 용도 |
@@ -15,7 +15,7 @@ http://<master-ablecube-ip>:8090/api/v1
 | `POST` | `/cube/license` | 현재 요청을 받은 노드의 로컬 라이선스 등록/조회 |
 | `POST` | `/cube/license/apply` | 마스터 기준 ablecube/SCVM/CCVM role별 라이선스 fan-out 등록 |
 | `POST` | `/cube/scvm/bootstrap` | 대표 SCVM의 `/root/bootstrap.sh` 실행 후 SCVM API health, 라이선스 등록/status 확인 |
-| `POST` | `/cube/ccvm/bootstrap` | CCVM의 `/root/bootstrap.sh` 실행 후 CCVM API health, 라이선스 등록/status 확인 |
+| `POST` | `/cube/ccvm/bootstrap` | 라이선스가 등록된 CCVM의 `/root/bootstrap.sh` 실행 후 API health와 라이선스 status 확인 |
 | `POST` | `/cube/deploy/run` | 올인원 배포 job 시작 |
 | `GET` | `/cube/deploy/jobs` | 최근 올인원 배포 job 목록 조회 |
 | `GET` | `/cube/deploy/jobs/{job_id}` | 특정 올인원 배포 job 상세 조회 |
@@ -35,7 +35,7 @@ http://<master-ablecube-ip>:8090/api/v1
 마스터 로컬 라이선스 등록:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license \
   -F "action=register" \
   -F "license_file=@./license.lic"
 ```
@@ -43,7 +43,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license \
 토큰 발급:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/auth/login \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"id":"root","password":"<linux-password>"}'
 ```
@@ -51,7 +51,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/auth/login \
 마스터의 현재 라이선스를 전체 물리 host에 배포:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -60,7 +60,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 SCVM 생성 후 SCVM API 노드에 라이선스 후처리만 재실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"action":"register","roles":["scvm"]}'
@@ -69,7 +69,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 CCVM 생성 후 CCVM API 노드에 라이선스 후처리만 재실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"action":"register","roles":["ccvm"]}'
@@ -78,7 +78,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 SCVM bootstrap API 직접 실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/scvm/bootstrap \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/scvm/bootstrap \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -87,7 +87,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/scvm/bootstrap \
 CCVM bootstrap API 직접 실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/ccvm/bootstrap \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/ccvm/bootstrap \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -96,7 +96,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/ccvm/bootstrap \
 bootstrap 스크립트 실행 없이 라이선스 후처리만 재실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/scvm/bootstrap \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/scvm/bootstrap \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"run_script":false}'
@@ -105,7 +105,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/scvm/bootstrap \
 올인원 job에서 bootstrap step만 라이선스 후처리로 재실행:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/deploy/run \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"only":["scvm_bootstrap"],"run_bootstrap_script":false}'
@@ -121,15 +121,17 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
 | `cluster_apply` | `cluster` 요청이 있으면 실행. `only`에 명시했는데 없으면 실패 | 없음 |
 | `scvm_prepare` | HCI/HCI-FS에서 `scvm_by_host`가 있으면 SCVM cloud-init/XML/lifecycle setup 후 public health 확인 | 없음 |
 | `scvm_bootstrap` | `scvm_prepare` 성공 후 자동 실행. 대표 SCVM 1대에서 `/root/bootstrap.sh` 실행 후 전체 SCVM 라이선스 후처리 | `bootstrap.scvm=true` |
+| `rbd_prepare` | HCI-FS에서 `rbd.action=create` 요청으로 image를 생성하고 전체 ablecube의 `/etc/ceph/rbdmap` 반영 | 없음 |
 | `storage_prepare` | Standalone 외 타입에서 `gfs`가 있으면 실행 | VM/HCI-FS: `bootstrap.gfs_configure=true` |
 | `local_prepare` | Standalone에서 `local`이 있으면 실행 | `bootstrap.local_configure=true` |
 | `ccvm_prepare` | `ccvm_cloudinit`, `ccvm_xml`, `ccvm_lifecycle` 중 하나 이상 있으면 CCVM cloud-init/XML/lifecycle setup 후 public health 확인 | 없음 |
-| `ccvm_bootstrap` | `ccvm_prepare` 성공 후 자동 실행. CCVM이 실행 중인 host에서 `/root/bootstrap.sh` 실행 후 CCVM 라이선스 후처리 | `bootstrap.ccvm=true` |
+| `ccvm_bootstrap` | `ccvm_prepare` 성공 후 CCVM 라이선스를 등록하고, CCVM이 실행 중인 host에서 `/root/bootstrap.sh`와 라이선스 status 확인 | `bootstrap.ccvm=true` |
+| `monitoring_prepare` | `ccvm_bootstrap` 성공 후 CCVM Wall 최초 구성과 서비스 active/enabled 상태 검증 | `bootstrap.wall=true` |
 | `system_profile` | 기본 실행. `update_system_profile=false`면 skip | 성공 step 기준으로 반영 |
 
-`mode=all`에서 특정 step 입력이 없으면 그 step은 skip된다. `only`에 특정 step을 명시한 경우에는 필요한 입력이 없으면 실패한다.
+`mode=all`에서 특정 step 입력이 없으면 그 step은 skip된다. `only`에 특정 step을 명시한 경우에는 필요한 입력이 없으면 실패한다. `only`에 `storage_prepare`가 있고 `rbd` payload도 있으면 기존 클라이언트 호환을 위해 `rbd_prepare`가 바로 앞에 자동 삽입된다.
 
-`scvm_bootstrap`/`ccvm_bootstrap`은 cloud-init이 VM 내부에 전달한 `/root/bootstrap.sh`를 host API가 qemu-guest-agent로 실행한 뒤, 대상 VM의 `/api/v1/health`가 응답하면 `/cube/license`로 라이선스를 등록하고 다시 status를 확인한다. `/api/v1/health`와 `/health`는 라이선스 등록 전에도 호출 가능한 public health check이다.
+`scvm_bootstrap`은 cloud-init이 VM 내부에 전달한 `/root/bootstrap.sh`를 host API가 qemu-guest-agent로 실행한 뒤, 대상 VM의 `/api/v1/health`가 응답하면 `/cube/license`로 라이선스를 등록하고 다시 status를 확인한다. 단독 Cloud VM 구성은 `/cube/license/apply`에 `roles:["ccvm"]`, `wait_for_ready:true`를 전달해 CCVM 시작 후 30초 간격으로 최대 6회 PCS `cloudcenter_res`가 Started인지 확인하고 라이선스만 등록한다. Standalone은 로컬 libvirt CCVM running 상태를 확인한다. 별도의 클라우드센터 구성 단계가 `/cube/ccvm/bootstrap`으로 상세 설정을 수행한 뒤 Mold bootstrap Job을 시작한다.
 
 SCVM bootstrap 스크립트는 Ceph bootstrap과 전체 SCVM 후속 설정을 포함하므로 모든 SCVM에서 동시에 실행하지 않는다. 기본 동작은 `cluster.json`의 첫 번째 SCVM을 대표 실행 대상으로 사용하고, 라이선스 등록/status 확인은 전체 SCVM을 대상으로 수행한다.
 
@@ -268,13 +270,39 @@ SCVM passthrough disk/NIC 값은 host마다 다르므로 `/cube/disk`, `/cube/ni
 
 ## HCI Filesystem 기준
 
-HCI Filesystem은 HCI 흐름에 공유 파일시스템 구성이 추가된다. `gfs`를 포함하면 `storage_prepare`에서 `/cube/gfs/manage` 흐름을 실행하고, 성공 시 `bootstrap.gfs_configure=true`를 반영한다.
+HCI Filesystem은 HCI 흐름에 공유 파일시스템 구성이 추가된다. `rbd_prepare`는 `/cube/rbd/manage`와 동일한 실행기로 RBD image를 생성하고 모든 ablecube에 rbdmap을 적용한다. 이후 `storage_prepare`가 `gfs` 요청으로 `/cube/gfs/manage` 흐름을 실행하고, 성공 시 `bootstrap.gfs_configure=true`를 반영한다.
 
-아래 JSON은 `gfs`와 `ccvm_xml.gfs_mount_point` 입력 위치를 보여주는 축약 예시다. 실제 요청에서는 HCI 예시처럼 `hosts`와 `scvm_by_host`를 3대 이상 모두 입력하고, `pcs_cluster_list`도 3대 이상 지정해야 한다.
+`gfs.action=init-pcs-cluster`는 기존 PCS 구성을 초기화한 뒤 다음 순서로 GFS용 PCS cluster를 준비한다.
+
+```text
+modify_lvm_conf
+set_cluster_password
+auth_hosts
+setup_cluster (setup --start)
+cluster enable --all
+cluster status 검증
+```
+
+기본값은 `cluster_name=cloudcenter_cluster`, `cluster_user=hacluster`, `cluster_password=password`이다. `configure-stonith`는 PCS cluster status 검증에 성공한 경우에만 실행된다.
+
+GFS 스토리지 구성은 `init-pcs-cluster -> configure-stonith -> create-gfs -> set-alert` 순서로 호출한다. 따라서 `gfs.stonith`에 모든 호스트의 IPMI 주소와 계정이 필요하다. `create-gfs`는 `configure-stonith` 완료 후 최소 25초 동안 대기하면서 `pcs status`를 3초 간격으로 조회하고, `glue-locking-clone`이 전체 호스트에서 연속 2회 Started로 확인된 뒤 `vg_glue/lv_glue`, `glue-gfs`, `/mnt/glue-gfs` 고정값으로 GFS2 PCS 리소스를 생성한다. GFS2 journal 수는 `cluster.json`의 유효한 호스트 수에 예비 journal 1개를 더해 계산한다.
+
+아래 JSON은 `rbd`, `gfs`, `ccvm_xml.gfs_mount_point` 입력 위치를 보여주는 축약 예시다. 실제 요청에서는 HCI 예시처럼 `hosts`와 `scvm_by_host`를 3대 이상 모두 입력하고, `pcs_cluster_list`도 3대 이상 지정해야 한다.
 
 ```json
 {
   "mode": "all",
+  "only": [
+    "license_apply",
+    "cluster_apply",
+    "scvm_prepare",
+    "scvm_bootstrap",
+    "rbd_prepare",
+    "storage_prepare",
+    "ccvm_prepare",
+    "ccvm_bootstrap",
+    "system_profile"
+  ],
   "cluster": {
     "action": "insert",
     "option": "add",
@@ -307,9 +335,18 @@ HCI Filesystem은 HCI 흐름에 공유 파일시스템 구성이 추가된다. `
       "replication_network_bridge": "br-repl"
     }
   },
+  "rbd": {
+    "action": "create",
+    "pool_name": "rbd",
+    "image_prefix": "gfs",
+    "size": 5000
+  },
   "gfs": {
     "action": "init-pcs-cluster",
-    "disks": ["/dev/disk/by-id/wwn-0xaaaa"],
+    "cluster_name": "cloudcenter_cluster",
+    "cluster_user": "hacluster",
+    "cluster_password": "password",
+    "mount_point": "/mnt/glue-gfs",
     "volume_groups": [
       { "vg_name": "vg_glue", "lv_name": "lv_glue" }
     ]
@@ -323,7 +360,7 @@ HCI Filesystem은 HCI 흐름에 공유 파일시스템 구성이 추가된다. `
 }
 ```
 
-실제 HCI Filesystem 구성에 필요한 disk, VG/LV 이름, mount point는 설치 정책에 맞춰 입력한다.
+`rbd_prepare`의 `output.val`에는 생성된 `pool/image` 목록이, `output.results`에는 host별 rbdmap 적용 결과가 기록된다. 일부 host의 map 적용이 실패하면 해당 단계와 전체 Job이 실패하고 이후 `storage_prepare`는 실행되지 않는다.
 
 ## VM 기준
 
@@ -462,7 +499,7 @@ job 시작 응답:
 상세 조회:
 
 ```bash
-curl -sS http://<master-ablecube-ip>:8090/api/v1/cube/deploy/jobs/<job_id> \
+curl -sS http://<master-ablecube-ip>:18090/api/v1/cube/deploy/jobs/<job_id> \
   -H "Authorization: Bearer <access_token>"
 ```
 

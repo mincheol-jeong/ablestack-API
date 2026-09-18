@@ -92,6 +92,105 @@ func TestBuildGFSDiskStatusDefaultsMissingDFUsage(t *testing.T) {
 	}
 }
 
+func TestGroupGFSDiskCandidatesReturnsSingleUUIDPerMount(t *testing.T) {
+	candidates := []gfsDiskCandidate{
+		{entry: GFSDiskDevice{
+			LVM:        "/dev/mapper/vg_glue-lv_glue",
+			Mountpoint: "/mnt/glue-gfs",
+			DiskID:     []string{"/dev/disk/by-id/dm-uuid-mpath-3600b"},
+		}},
+		{entry: GFSDiskDevice{
+			LVM:        "/dev/mapper/vg_glue-lv_glue",
+			Mountpoint: "/mnt/glue-gfs",
+			DiskID:     []string{"/dev/disk/by-id/dm-uuid-mpath-3600a"},
+		}},
+	}
+
+	grouped := groupGFSDiskCandidates(candidates, true, nil)
+	if len(grouped) != 1 {
+		t.Fatalf("grouped mounts length = %d", len(grouped))
+	}
+	if len(grouped[0].DiskID) != 1 {
+		t.Fatalf("disk_id length = %d, disk_id = %#v", len(grouped[0].DiskID), grouped[0].DiskID)
+	}
+	if grouped[0].DiskID[0] != "/dev/disk/by-id/dm-uuid-mpath-3600a" {
+		t.Fatalf("unexpected representative UUID: %q", grouped[0].DiskID[0])
+	}
+}
+
+func TestBuildGFSDiskStatusExposesOnlyMultipathDeviceInMultipathMode(t *testing.T) {
+	mountpoint := "/mnt/glue-gfs"
+	diskType := "disk"
+	mpathType := "mpath"
+	lvmType := "lvm"
+	dmUUID := "mpath-3600a"
+	devices := []GFSBlockDevice{{
+		Name: "sdb", Kname: "sdb", Path: strPtr("/dev/sdb"), Type: &diskType,
+		Children: []GFSBlockDevice{{
+			Name: "mpathb", Kname: "dm-1", Path: strPtr("/dev/mapper/mpathb"), Type: &mpathType, DmUUID: &dmUUID,
+			Children: []GFSBlockDevice{{
+				Name: "vg_glue-lv_glue", Kname: "dm-2", Path: strPtr("/dev/mapper/vg_glue-lv_glue"), Type: &lvmType, Mountpoint: strPtr(mountpoint),
+			}},
+		}},
+	}}
+
+	status := BuildGFSDiskStatus(
+		devices,
+		[]GFSMount{{Device: "/dev/mapper/vg_glue-lv_glue", Mountpoint: mountpoint}},
+		"ablestack-vm",
+		true,
+		map[string][]string{"dm-1": {"/dev/disk/by-id/dm-uuid-mpath-3600a"}},
+		nil,
+	)
+	if len(status.Blockdevices) != 1 {
+		t.Fatalf("Blockdevices length = %d", len(status.Blockdevices))
+	}
+	got := status.Blockdevices[0]
+	if len(got.Multipaths) != 1 || got.Multipaths[0] != "/dev/mapper/mpathb" {
+		t.Fatalf("unexpected multipath devices: %#v", got.Multipaths)
+	}
+	if status.Mode != "multi" {
+		t.Fatalf("unexpected mode: %q", status.Mode)
+	}
+	if len(got.Devices) != 0 {
+		t.Fatalf("physical paths must be hidden in multipath mode: %#v", got.Devices)
+	}
+}
+
+func TestBuildGFSDiskStatusExposesOnlyPhysicalDeviceInSingleMode(t *testing.T) {
+	mountpoint := "/mnt/glue-gfs"
+	diskType := "disk"
+	lvmType := "lvm"
+	devices := []GFSBlockDevice{{
+		Name: "sdb", Kname: "sdb", Path: strPtr("/dev/sdb"), Type: &diskType,
+		Children: []GFSBlockDevice{{
+			Name: "vg_glue-lv_glue", Kname: "dm-2", Path: strPtr("/dev/mapper/vg_glue-lv_glue"), Type: &lvmType, Mountpoint: strPtr(mountpoint),
+		}},
+	}}
+
+	status := BuildGFSDiskStatus(
+		devices,
+		[]GFSMount{{Device: "/dev/mapper/vg_glue-lv_glue", Mountpoint: mountpoint}},
+		"ablestack-vm",
+		true,
+		nil,
+		nil,
+	)
+	if len(status.Blockdevices) != 1 {
+		t.Fatalf("Blockdevices length = %d", len(status.Blockdevices))
+	}
+	got := status.Blockdevices[0]
+	if len(got.Devices) != 1 || got.Devices[0] != "/dev/sdb" {
+		t.Fatalf("unexpected single-path devices: %#v", got.Devices)
+	}
+	if status.Mode != "single" {
+		t.Fatalf("single-path topology must not be classified as multipath: %q", status.Mode)
+	}
+	if len(got.Multipaths) != 0 {
+		t.Fatalf("multipath devices must be hidden in single mode: %#v", got.Multipaths)
+	}
+}
+
 func strPtr(value string) *string {
 	return &value
 }

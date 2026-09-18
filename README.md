@@ -32,7 +32,7 @@ shell/                         보안 패치 shell script
 
 ## Quick Start
 
-현재 서버 listen port는 `cmd/apiserver/main.go` 기준 `8090`으로 고정되어 있습니다.
+서버 listen port는 `ABLESTACK_API_PORT`를 사용하며 기본값은 `18090`입니다.
 
 ```bash
 go run ./cmd/apiserver
@@ -41,13 +41,13 @@ go run ./cmd/apiserver
 기본 생존 확인:
 
 ```bash
-curl -sS http://127.0.0.1:8090/api/v1/cube/cluster/health
+curl -sS http://127.0.0.1:18090/api/v1/cube/cluster/health
 ```
 
 Swagger UI:
 
 ```text
-http://<ablecube-ip>:8090/swagger/index.html
+http://<ablecube-ip>:18090/swagger/index.html
 ```
 
 ## Runtime Requirements
@@ -61,13 +61,16 @@ http://<ablecube-ip>:8090/swagger/index.html
 | Glue/Ceph 상태 및 스토리지 API | `ceph`, `rbd`, `radosgw-admin`, `rbd mirror`, Ceph dashboard API |
 | Glue iSCSI | `ceph orch`, Ceph dashboard API, `podman`, iSCSI gateway container `gwcli` |
 | Glue SMB | SCVM 로컬 `Samba-Execute.sh`, `smbpasswd`, `pdbedit`, Samba service, CephFS mount command |
+| CCVM Wall 모니터링 구성 | `/usr/share/ablestack/ablestack-wall/python`의 기존 Wall Python 도구와 해당 Python 모듈 |
 | 디스크/NIC 조회 | `lsblk`, `lspci`, `nmcli`, `ip` |
-| DB dump | `/usr/bin/mysqldump`, `crontab`, `at` |
+| DB dump | `/usr/bin/mysqldump`; 사용자 지정 반복/일회 일정에는 `crontab`, `at` |
 | SSH key scan/security patch | `ssh`, `ssh-keyscan`, `ssh-keygen`, `security_patch.sh` |
 
 macOS 개발 환경에서 `go test ./...`를 실행하려면 libvirt CGO 의존성 때문에 `pkg-config`와 libvirt 개발 패키지가 필요합니다.
 
-RPM hard dependency는 host/SCVM/CCVM 공통 실행에 필요한 `systemd`, `bash`, `python3` 중심으로 유지합니다. Samba, Ceph, podman, pcs, virsh 같은 role-specific runtime command는 해당 role 이미지 또는 role 패키지에서 제공하고, API RPM 설치 자체를 막는 dependency로 두지 않습니다.
+RPM hard dependency는 host/SCVM/CCVM 공통 실행에 필요한 `systemd`, `bash`, `python3` 중심으로 유지합니다. Linux 계정 인증과 CCVM 자동 스냅샷·DB 백업은 Go에서 직접 처리하며 Python을 호출하지 않습니다. Python은 보안 증적, Samba 및 일부 shell helper 실행 때문에 유지합니다. Samba, Ceph, podman, pcs, virsh 같은 role-specific runtime command는 해당 role 이미지 또는 role 패키지에서 제공하고, API RPM 설치 자체를 막는 dependency로 두지 않습니다.
+
+CCVM 자동 스냅샷과 DB dump는 API 프로세스 내부 스케줄러가 매일 01:00에 실행합니다. 기존 `create_ccvm_snap.py`, `backup_mysql.py` root cron은 API 시작 시 제거하며, DB dump API로 사용자가 등록한 `RegularBackup`/`DeleteOldBackup` 일정은 보존합니다.
 
 ## Configuration
 
@@ -77,7 +80,7 @@ RPM hard dependency는 host/SCVM/CCVM 공통 실행에 필요한 `systemd`, `bas
 | `ABLESTACK_CONFIG_PATH` | ABLESTACK 설정 루트. 기본값은 `/etc/ablestack` |
 | `ABLESTACK_STATE_PATH` | VM 설정 생성물 루트. 기본값은 `/etc/ablestack/vmconfig` |
 | `ABLESTACK_API_SCHEME` | 노드 간 API 호출 scheme. 기본값 `http` |
-| `ABLESTACK_API_PORT` | 노드 간 API 호출 대상 port. 기본값 `8090` |
+| `ABLESTACK_API_PORT` | 서버 listen 및 노드 간 API 호출 대상 port. 기본값 `18090` |
 | `ABLESTACK_SECURITY_PATCH_SCRIPT` | 보안 패치 스크립트 경로 override |
 | `ABLESTACK_NODE_ROLE` | 노드 역할 override. Glue API route는 `scvm`일 때만 등록 |
 | `ABLESTACK_NODE_ROLE_FILE` | 노드 역할 파일 override. 기본값 `/etc/ablestack/node-role` |
@@ -92,9 +95,17 @@ RPM hard dependency는 host/SCVM/CCVM 공통 실행에 필요한 `systemd`, `bas
 ./scripts/build-rpm.sh
 ```
 
-RPM 버전은 루트의 `VERSION` 파일을 기준으로 결정합니다. `scripts/build-rpm.sh`는 `CHANGELOG.md`에 같은 버전의 릴리즈 섹션이 있는지도 확인합니다. 임시로 다른 버전을 빌드해야 하면 `VERSION=0.1.5 RELEASE=1 ./scripts/build-rpm.sh`처럼 환경 변수로 override할 수 있습니다. RPM에는 `README.md`, `CHANGELOG.md`, `VERSION`이 문서 파일로 포함됩니다.
+RPM 버전은 루트의 `VERSION` 파일을 기준으로 결정합니다. `scripts/build-rpm.sh`는 `CHANGELOG.md`에 같은 버전의 릴리즈 섹션이 있는지도 확인합니다. 임시 버전은 `VERSION=0.1.5 RELEASE=1 ./scripts/build-rpm.sh`, API 포트는 `API_PORT=28090 ./scripts/build-rpm.sh`처럼 지정할 수 있습니다. 직접 `rpmbuild`를 실행할 때는 `--define "api_port 28090"`을 사용합니다. RPM에는 `README.md`, `CHANGELOG.md`, `VERSION`이 문서 파일로 포함됩니다.
 
-빌드 결과는 `dist/rpm/rpmbuild/RPMS`와 `dist/rpm/rpmbuild/SRPMS` 아래에 생성됩니다. RPM은 `cmd/apiserver/main.go`를 `/usr/bin/ablestack-api`로 빌드하고 `ablestack-api.service`를 설치한 뒤 `systemctl enable --now ablestack-api.service`를 실행합니다. `firewall-cmd`가 있는 환경에서는 `firewalld`를 `enable --now` 처리하고 API 포트 `8090/tcp`를 runtime/permanent 모두 열어줍니다.
+빌드 결과는 `dist/rpm/rpmbuild/RPMS`와 `dist/rpm/rpmbuild/SRPMS` 아래에 생성됩니다. 신규 설치는 지정한 포트를 `/etc/ablestack/ablestack-api.env`에 반영하고, 업그레이드는 기존 env의 유효한 포트를 보존합니다. 포트 값이 없던 구버전 업그레이드는 기본값 `18090`으로 이전합니다. RPM은 새 포트를 runtime/permanent 방화벽에 먼저 추가한 뒤 서비스를 재시작하며, 새 포트 listen 확인이 끝난 경우에만 기존 API 포트 방화벽 규칙을 제거합니다. 실패하면 기존 포트 설정으로 복구하고 새 방화벽 규칙을 제거합니다.
+
+설치 후 포트를 변경할 때는 다음 관리 명령을 사용합니다. 이 명령이 환경 파일 갱신, 새 방화벽 포트 추가, 서비스 재시작과 listen 확인, 기존 방화벽 포트 제거를 순서대로 처리합니다.
+
+```bash
+sudo /usr/libexec/ablestack-api/configure-api-port.sh 28090
+```
+
+환경 파일만 직접 수정하는 경우에는 `systemctl restart ablestack-api` 외에도 새 포트의 runtime/permanent 방화벽 규칙을 추가하고 기존 포트 규칙을 별도로 제거해야 합니다.
 
 RPM 설치 경로:
 
@@ -104,6 +115,7 @@ RPM 설치 경로:
 | Cockpit auth helper | `/usr/bin/ablestack-auth-token` |
 | systemd unit | `/usr/lib/systemd/system/ablestack-api.service` |
 | service env | `/etc/ablestack/ablestack-api.env` |
+| port configuration helper | `/usr/libexec/ablestack-api/configure-api-port.sh` |
 | cluster properties | `/etc/ablestack/properties` |
 | XML templates | `/etc/ablestack/xml-template` |
 | shell resources | `/etc/ablestack/shell` |
@@ -124,13 +136,13 @@ Cockpit UI에서는 로그인된 Linux 세션을 기준으로 `/usr/bin/ablestac
 ## API Base URL
 
 ```text
-http://<ablecube-ip>:8090/api/v1
+http://<ablecube-ip>:18090/api/v1
 ```
 
 예시:
 
 ```bash
-curl -sS http://10.10.12.1:8090/api/v1/cube/disk?action=list
+curl -sS http://10.10.12.1:18090/api/v1/cube/disk?action=list
 ```
 
 ## Main API Groups
@@ -147,7 +159,7 @@ curl -sS http://10.10.12.1:8090/api/v1/cube/disk?action=list
 | Glue/GFS | `GET /cube/gluecluster/status`, `GET /cube/gfs/disk/status` | 스토리지 클러스터 상태 |
 | Glue API | `GET /glue/status`, `GET/POST /glue/gluefs`, `GET/POST /glue/nfs`, `GET/POST /glue/rgw`, `GET/POST /glue/smb`, `GET/POST /glue/iscsi`, `GET/POST /glue/mirror` | SCVM 전용 Glue API namespace |
 | Backup | `POST /cube/ccvm/snap`, `POST /cube/ccvm/backup`, `POST /cube/db/dump` | snapshot, 파일 백업, DB 백업 |
-| Operations | `POST /cube/license`, `POST /cube/license/apply`, `POST /cube/deploy/run`, `POST /cube/version/update`, `POST /cube/security/patch` | 운영/유지보수 작업 |
+| Operations | `POST /cube/license`, `POST /cube/license/apply`, `POST /cube/deploy/run`, `POST /cube/version/update`, `POST /cube/security/patch`, `GET/POST /cube/security/evidence` | 운영/유지보수 및 보안 증적 작업 |
 
 ## Documentation
 
@@ -167,4 +179,4 @@ POST /api/v1/cube/cluster/apply
   -> 각 대상 노드의 /api/v1/cube/cluster/apply-local 호출
 ```
 
-현재 구조를 유지하려면 3대 호스트 사이에 `8090/tcp` 통신이 가능해야 합니다. 개발 완료 후 운영 안정화 단계에서는 내부 호출용 토큰을 추가해 외부 사용자 호출과 노드 간 호출을 분리하는 방향으로 개선합니다.
+현재 구조를 유지하려면 모든 호스트 사이에 `ABLESTACK_API_PORT`로 설정한 TCP 포트 통신이 가능해야 합니다.

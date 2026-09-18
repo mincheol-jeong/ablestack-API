@@ -5,7 +5,7 @@
 이 문서는 API 작업자와 UI 작업자가 설치 흐름을 맞추기 위한 임시 정리 문서이다. 기준 코드는 현재 `ablestack-API`의 실제 Gin route와 handler이며, 기본 API prefix는 아래와 같다.
 
 ```text
-http://<ablecube-ip>:8090/api/v1
+http://<ablecube-ip>:18090/api/v1
 ```
 
 운영 API는 라이선스 등록 이후 `Authorization: Bearer <token>` 헤더를 붙여 호출하는 것을 전제로 한다. 최초 라이선스 등록과 라이선스 상태 조회는 토큰 없이 호출할 수 있다.

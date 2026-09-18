@@ -16,7 +16,7 @@ const gfsResourceStatusCommandTimeout = 10 * time.Second
 // GetGFSResourceStatus godoc
 //
 //	@Summary		GFS Resource Status
-//	@Description	pcs status xml 기반 GFS 리소스 상태를 조회합니다.
+//	@Description	pcs status xml 기반 펜싱, 잠금 및 glue-gfs/glue-gfs_res GFS2 마운트 리소스 상태를 조회합니다.
 //	@Tags			Cube-GFS
 //	@Accept			x-www-form-urlencoded
 //	@Produce		json

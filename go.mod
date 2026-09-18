@@ -6,6 +6,8 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/goccy/go-json v0.10.6
 	github.com/gofrs/uuid v4.4.0+incompatible
+	github.com/openwall/yescrypt-go v1.0.0
+	github.com/sergeymakinen/go-crypt v1.0.5
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +16,7 @@ import (
 	Auth "ablecloud.io/ablestack-api/internal/handler/auth"
 	CubeHandler "ablecloud.io/ablestack-api/internal/handler/cube"
 	GlueHandler "ablecloud.io/ablestack-api/internal/handler/glue"
+	MoldHandler "ablecloud.io/ablestack-api/internal/handler/mold"
 	SwaggerHandler "ablecloud.io/ablestack-api/internal/handler/swagger"
 	"ablecloud.io/ablestack-api/internal/infra/logging"
 	C "ablecloud.io/ablestack-api/internal/service/controller"
@@ -55,13 +59,18 @@ func main() {
 	c.StatusRegister(CubeHandler.UpdateClusterConfig)
 	// Background daily ssh-keyscan based on cluster.json + systemProfile
 	c.StatusRegister(CubeHandler.AutoSSHKnownHostsScan)
+	c.StatusRegister(CubeHandler.AutoLegacyPythonCronCleanup)
 	c.StatusRegister(CubeHandler.AutoCCVMSnapshotBackup)
+	c.StatusRegister(CubeHandler.AutoCCVMDBDumpBackup)
 	c.StatusRegister(CubeHandler.AutoCCVMFileBackupSchedule)
 	c.StatusRegister(CubeHandler.UpdateNICs)
 	c.StatusRegister(CubeHandler.UpdateDisk)
 
 	go c.Start()
-	APIPort := "8090"
+	apiPort, err := resolveAPIPort(os.Getenv("ABLESTACK_API_PORT"))
+	if err != nil {
+		log.Fatalf("invalid ABLESTACK_API_PORT: %v", err)
+	}
 	docs.SwaggerInfo.Schemes = []string{"http", "https"}
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -110,6 +119,9 @@ func main() {
 			cube.GET("/deploy/jobs", CubeHandler.ListDeployRunJobs)
 			cube.GET("/deploy/jobs/:job_id", CubeHandler.GetDeployRunJob)
 			cube.GET("/hosts", CubeHandler.GetHosts)
+			cube.POST("/hosts/remove", CubeHandler.StartHostRemove)
+			cube.GET("/hosts/remove/jobs", CubeHandler.ListHostRemoveJobs)
+			cube.GET("/hosts/remove/jobs/:job_id", CubeHandler.GetHostRemoveJob)
 			cube.GET("/test", CubeHandler.GetHosts)
 			cube.GET("/cluster/config", CubeHandler.GetClusterConfig)
 			cube.POST("/cluster/apply", CubeHandler.ApplyClusterConfig)
@@ -123,6 +135,7 @@ func main() {
 			cube.POST("/time-server", CubeHandler.ConfigureTimeServer)
 			cube.GET("/ccvm/status", CubeHandler.GetCCVMStatus)
 			cube.POST("/ccvm/edit", CubeHandler.EditCCVM)
+			cube.POST("/ccvm/create", CubeHandler.CreateCCVM)
 			cube.POST("/ccvm/xml", CubeHandler.CreateCCVMXML)
 			cube.POST("/ccvm/bootstrap", CubeHandler.CCVMBootstrap)
 			cube.POST("/ccvm/snap", CubeHandler.CCVMSnap)
@@ -148,9 +161,14 @@ func main() {
 			cube.POST("/scvm/lifecycle", CubeHandler.SCVMLifecycle)
 			cube.POST("/pcs/control", CubeHandler.CCVMPCSControl)
 			cube.POST("/ccvm/service/control", CubeHandler.CCVMServiceControl)
+			cube.POST("/ccvm/monitoring/config", CubeHandler.CCVMMonitoringConfig)
 			cube.POST("/version/update", CubeHandler.VersionUpdate)
 			cube.POST("/security/patch", CubeHandler.SecurityPatch)
+			cube.GET("/security/evidence", CubeHandler.GetLatestSecurityEvidence)
+			cube.POST("/security/evidence", CubeHandler.GenerateSecurityEvidence)
+			cube.GET("/security/evidence/download", CubeHandler.DownloadLatestSecurityEvidence)
 			cube.POST("/ssh/key", CubeHandler.SSHKey)
+			cube.POST("/ssh/trust", CubeHandler.SSHTrust)
 			cube.POST("/license", CubeHandler.LicenseControl)
 			cube.POST("/license/apply", CubeHandler.ApplyLicenseToCluster)
 			cube.POST("/db/dump", CubeHandler.DBDump)
@@ -158,6 +176,7 @@ func main() {
 			cube.GET("/disk", CubeHandler.GetDisk)
 		}
 		GlueHandler.RegisterRoutesIfSCVM(v1.Group("/glue"))
+		MoldHandler.RegisterRoutesIfCCVM(v1.Group("/mold"))
 		v1.GET("/version", CubeHandler.Version)
 		v1.GET("/err", c.Error)
 		v1.DELETE("/err", c.DeleteError)
@@ -170,13 +189,25 @@ func main() {
 	r.GET("/swagger/*any", SwaggerHandler.Handler())
 	r.GET("/health", CubeHandler.Health)
 
-	err = r.Run(":" + APIPort)
+	err = r.Run(":" + apiPort)
 	if err != nil {
 		c.AddError(err)
 	}
 
 	c.Stop()
 	fmt.Println("end")
+}
+
+func resolveAPIPort(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "18090", nil
+	}
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return "", fmt.Errorf("port must be an integer between 1 and 65535")
+	}
+	return strconv.Itoa(port), nil
 }
 
 func errorMaker() {

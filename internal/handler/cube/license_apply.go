@@ -22,7 +22,11 @@ type LicenseApplyRequest = CubeModel.LicenseApplyRequest
 type LicenseApplyResponse = CubeModel.LicenseApplyResponse
 type LicenseApplyTargetResult = CubeModel.LicenseApplyTargetResult
 
-const licenseApplyRemoteTimeout = 30 * time.Second
+const (
+	licenseApplyRemoteTimeout = 30 * time.Second
+	ccvmLicenseReadyInterval  = 30 * time.Second
+	ccvmLicenseReadyAttempts  = 6
+)
 
 const (
 	licenseApplyRoleAblecube = "ablecube"
@@ -90,19 +94,40 @@ func runLicenseApply(req LicenseApplyRequest, cfg *CubeModel.ClusterConfigSectio
 	if len(targets) == 0 {
 		return LicenseApplyResponse{Code: http.StatusBadRequest, Message: "no targets to apply"}
 	}
+	appendAbleStackAPILog("license_apply", "event=start action=%q target_count=%d wait_for_ready=%t", action, len(targets), req.WaitForReady)
 
 	defaultContent := strings.TrimSpace(req.LicenseContent)
 	if action == "register" && defaultContent == "" && len(req.Licenses) == 0 {
 		defaultContent, err = currentLocalLicenseContent()
 		if err != nil {
+			appendAbleStackAPILog("license_apply", "event=local_license_read_failed error=%q", err.Error())
 			return LicenseApplyResponse{Code: http.StatusBadRequest, Message: "license_content required: " + err.Error()}
 		}
+		appendAbleStackAPILog("license_apply", "event=local_license_loaded encoded_bytes=%d", len(defaultContent))
 	}
 
 	results := make([]LicenseApplyTargetResult, 0, len(targets))
 	for _, target := range targets {
+		attempts := 0
+		if action == "register" && req.WaitForReady && target.Role == licenseApplyRoleCCVM {
+			attempts, err = waitCCVMLicenseTargetReady(cfg, target.Target)
+			if err != nil {
+				results = append(results, LicenseApplyTargetResult{
+					Role:     target.Role,
+					Hostname: target.Hostname,
+					Target:   target.Target,
+					Code:     http.StatusInternalServerError,
+					Message:  err.Error(),
+					Attempts: attempts,
+				})
+				continue
+			}
+		}
 		content := licenseContentForTarget(req, target, defaultContent)
+		appendAbleStackAPILog("license_apply", "event=target_apply_start role=%q hostname=%q target=%q action=%q attempts=%d", target.Role, target.Hostname, target.Target, action, attempts)
 		result := applyLicenseOnTarget(target, req, content, authHeader)
+		result.Attempts = attempts
+		appendAbleStackAPILog("license_apply", "event=target_apply_finished role=%q hostname=%q target=%q code=%d message=%q attempts=%d", target.Role, target.Hostname, target.Target, result.Code, result.Message, attempts)
 		results = append(results, result)
 	}
 
@@ -114,6 +139,65 @@ func runLicenseApply(req LicenseApplyRequest, cfg *CubeModel.ClusterConfigSectio
 		}
 	}
 	return LicenseApplyResponse{Code: http.StatusOK, Message: "license apply success", Results: results}
+}
+
+func waitCCVMLicenseTargetReady(cfg *CubeModel.ClusterConfigSection, target string) (int, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return 0, fmt.Errorf("ccvm license readiness target is empty")
+	}
+	if cfg == nil {
+		return 0, fmt.Errorf("ccvm license readiness cluster config is empty")
+	}
+
+	readinessSource := "pcs:cloudcenter_res"
+	if resetCloudCenterIsStandalone(cfg) {
+		readinessSource = "libvirt:ccvm"
+	}
+	appendAbleStackAPILog("ccvm_license", "event=readiness_start target=%q source=%q interval=%s max_attempts=%d", target, readinessSource, ccvmLicenseReadyInterval, ccvmLicenseReadyAttempts)
+	var lastErr error
+	for attempt := 1; attempt <= ccvmLicenseReadyAttempts; attempt++ {
+		time.Sleep(ccvmLicenseReadyInterval)
+		ready, startedNode, err := ccvmLicenseRuntimeReady(cfg)
+		if err == nil && ready {
+			appendAbleStackAPILog("ccvm_license", "event=readiness_success target=%q source=%q started_node=%q attempt=%d", target, readinessSource, startedNode, attempt)
+			return attempt, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf("ccvm runtime is not started")
+		}
+		appendAbleStackAPILog("ccvm_license", "event=readiness_retry target=%q source=%q started_node=%q attempt=%d error=%q", target, readinessSource, startedNode, attempt, lastErr.Error())
+	}
+	appendAbleStackAPILog("ccvm_license", "event=readiness_failed target=%q source=%q attempts=%d error=%q", target, readinessSource, ccvmLicenseReadyAttempts, lastErr.Error())
+	return ccvmLicenseReadyAttempts, fmt.Errorf(
+		"ccvm runtime readiness check failed after %d attempts at %s intervals: %w",
+		ccvmLicenseReadyAttempts,
+		ccvmLicenseReadyInterval,
+		lastErr,
+	)
+}
+
+func ccvmLicenseRuntimeReady(cfg *CubeModel.ClusterConfigSection) (bool, string, error) {
+	if resetCloudCenterIsStandalone(cfg) {
+		state, exists, err := readLocalCCVMState()
+		if err != nil {
+			return false, "", err
+		}
+		return exists && strings.EqualFold(strings.TrimSpace(state), "running"), "local", nil
+	}
+
+	status, err := ccvmSecondaryResizePCSStatus(cfg)
+	if err != nil {
+		return false, "", err
+	}
+	startedNode := strings.TrimSpace(status.Started)
+	return ccvmLicensePCSReady(status), startedNode, nil
+}
+
+func ccvmLicensePCSReady(status ccvmSecondaryResizePCSStatusValue) bool {
+	return strings.EqualFold(strings.TrimSpace(status.Role), "Started") && strings.TrimSpace(status.Started) != ""
 }
 
 func normalizeLicenseApplyAction(action string) string {
@@ -420,7 +504,8 @@ func callLicenseRemote(target string, req LicenseApplyRequest, content string, a
 		return LicenseResponse{}, err
 	}
 
-	httpReq, err := http.NewRequest(http.MethodPost, buildTargetURL(target)+"/api/v1/cube/license", bytes.NewReader(body))
+	url := buildTargetURL(target) + "/api/v1/cube/license"
+	httpReq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return LicenseResponse{}, err
 	}
@@ -430,8 +515,10 @@ func callLicenseRemote(target string, req LicenseApplyRequest, content string, a
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	appendAbleStackAPILog("license_apply", "event=remote_request_start target=%q url=%q action=%q", target, url, req.Action)
 	resp, err := (&http.Client{Timeout: licenseApplyRemoteTimeout}).Do(httpReq)
 	if err != nil {
+		appendAbleStackAPILog("license_apply", "event=remote_request_failed target=%q url=%q error=%q", target, url, err.Error())
 		return LicenseResponse{}, err
 	}
 	defer resp.Body.Close()
@@ -447,6 +534,7 @@ func callLicenseRemote(target string, req LicenseApplyRequest, content string, a
 	if out.Code == 0 {
 		out.Code = resp.StatusCode
 	}
+	appendAbleStackAPILog("license_apply", "event=remote_response target=%q url=%q http_status=%d response_code=%d", target, url, resp.StatusCode, out.Code)
 	return out, nil
 }
 

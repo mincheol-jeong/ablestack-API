@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -28,20 +29,27 @@ type SecurityPatchTargetResult = CubeModel.SecurityPatchTargetResult
 type SecurityPatchValue = CubeModel.SecurityPatchValue
 
 const (
-	securityPatchMaxRetries      = 3
-	securityPatchRetryDelaySec   = 2
-	securityPatchSuccessPattern  = "Permissions have been updated."
-	securityPatchDefaultRetName  = "Security Update"
-	securityPatchScriptPath      = "/usr/local/sbin/security_patch.sh"
-	securityPatchCommandTimeout  = 30 * time.Minute
-	securityPatchSSHConnectTO    = "10"
-	securityPatchAblestackJSONPy = "python/ablestack_json/ablestackJson.py"
+	securityPatchMaxRetries     = 3
+	securityPatchRetryDelaySec  = 2
+	securityPatchSuccessPattern = "Permissions have been updated."
+	securityPatchDefaultRetName = "Security Update"
+	securityPatchVMPath         = "/usr/local/sbin/security_patch.sh"
+	securityPatchAblecubePath   = "/usr/libexec/ablestack-api/shell/security_patch.sh"
+	securityPatchCommandTimeout = 30 * time.Minute
+	securityPatchAPITimeout     = securityPatchCommandTimeout + time.Minute
+	securityPatchAPIPath        = "/api/v1/cube/security/patch"
+	securityPatchSystemAPIPath  = "/api/v1/cube/system/config"
 )
+
+type securityPatchTarget struct {
+	IP   string
+	Kind string
+}
 
 // SecurityPatch godoc
 //
 //	@Summary		Security Patch
-//	@Description	cluster.json 대상에 security_patch.sh를 로컬/SSH로 실행하거나 security_patch.status 값을 업데이트합니다.
+//	@Description	cluster.json 대상 노드 API를 호출해 각 노드가 security_patch.sh를 로컬 실행하거나 security_patch.status 값을 업데이트합니다.
 //	@Tags			Cube-Security
 //	@Accept			json
 //	@Produce		json
@@ -149,7 +157,7 @@ func runSecurityPatch(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSect
 			Val: SecurityPatchValue{
 				Summary: SecurityPatchSummary{
 					Message:     "security_patch.status updated to true for all ablecube hosts",
-					JSON:        resolveSecurityPatchStatusJSONPath(),
+					JSON:        resolveClusterJSONPath(),
 					Val:         "security_patch.status = true",
 					ClusterType: clusterType,
 				},
@@ -158,8 +166,9 @@ func runSecurityPatch(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSect
 	}
 
 	if req.CephSSHChange {
-		result := runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, true)
+		result := runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, true, resolveSecurityPatchAblecubePath())
 		result.IP = "127.0.0.1"
+		result.TargetKind = "ablecube"
 		result.IsLocal = true
 		success := 0
 		if result.OK {
@@ -184,25 +193,47 @@ func runSecurityPatch(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSect
 		}, []SecurityPatchTargetResult{result})
 	}
 
+	if req.Local && !req.AddHost {
+		kind := securityPatchLocalTargetKind(req, cfg)
+		result := runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, false, securityPatchScriptPathForKind(kind))
+		result.TargetKind = kind
+		result.Transport = "local"
+		success := countSecurityPatchSuccess([]SecurityPatchTargetResult{result})
+		code := http.StatusOK
+		if success == 0 {
+			code = http.StatusMultiStatus
+		}
+		return securityPatchResultsResponse(req, code, SecurityPatchSummary{
+			RequestedNewPort: req.NewPort,
+			Total:            1,
+			Success:          success,
+			Failed:           1 - success,
+			DryRun:           req.DryRun,
+			MaxRetries:       securityPatchMaxRetries,
+			RetryDelaySec:    securityPatchRetryDelaySec,
+			SuccessPattern:   securityPatchSuccessPattern,
+			ClusterType:      clusterType,
+		}, []SecurityPatchTargetResult{result})
+	}
+
 	if req.AddHost {
 		results := []SecurityPatchTargetResult{
-			runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, false),
+			runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, false, resolveSecurityPatchAblecubePath()),
 		}
 		results[0].IP = "127.0.0.1"
+		results[0].TargetKind = "ablecube"
 		results[0].IsLocal = true
+		results[0].Transport = "local"
 		if clusterType == "ablestack-hci" {
-			results = append(results, runSecurityPatchRemote("scvm", req.SSHUser, req.SSHPort, req.NewPort, req.DryRun, clusterType, req.PortChange))
+			results = append(results, runSecurityPatchRemoteAPI("scvm", "scvm", req, clusterType))
 		}
 		success := countSecurityPatchSuccess(results)
 		code := http.StatusOK
 		if success != len(results) {
 			code = http.StatusMultiStatus
 		}
-		connectPort := req.SSHPort
 		return securityPatchResultsResponse(req, code, SecurityPatchSummary{
 			RequestedNewPort: req.NewPort,
-			ConnectPort:      &connectPort,
-			SSHUser:          req.SSHUser,
 			Total:            len(results),
 			Success:          success,
 			Failed:           len(results) - success,
@@ -228,14 +259,17 @@ func runSecurityPatch(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSect
 	localIPs := getSecurityPatchLocalIPv4s()
 	results := make([]SecurityPatchTargetResult, 0, len(targets))
 	for _, target := range targets {
-		if _, ok := localIPs[target]; ok {
-			res := runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, false)
-			res.IP = target
+		scriptPath := securityPatchScriptPathForKind(target.Kind)
+		if _, ok := localIPs[target.IP]; ok {
+			res := runSecurityPatchLocal(req.NewPort, req.DryRun, clusterType, req.PortChange, false, scriptPath)
+			res.IP = target.IP
+			res.TargetKind = target.Kind
 			res.IsLocal = true
+			res.Transport = "local"
 			results = append(results, res)
 			continue
 		}
-		results = append(results, runSecurityPatchRemote(target, req.SSHUser, req.SSHPort, req.NewPort, req.DryRun, clusterType, req.PortChange))
+		results = append(results, runSecurityPatchRemoteAPI(target.IP, target.Kind, req, clusterType))
 	}
 
 	success := countSecurityPatchSuccess(results)
@@ -243,11 +277,8 @@ func runSecurityPatch(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSect
 	if success != len(results) {
 		code = http.StatusMultiStatus
 	}
-	connectPort := req.SSHPort
 	return securityPatchResultsResponse(req, code, SecurityPatchSummary{
 		RequestedNewPort: req.NewPort,
-		ConnectPort:      &connectPort,
-		SSHUser:          req.SSHUser,
 		Total:            len(results),
 		Success:          success,
 		Failed:           len(results) - success,
@@ -284,7 +315,7 @@ func loadSecurityPatchClusterConfig(jsonPath string) (*CubeModel.ClusterConfigSe
 	return &cfg, nil
 }
 
-func gatherSecurityPatchTargets(cfg *CubeModel.ClusterConfigSection, kinds []string) []string {
+func gatherSecurityPatchTargets(cfg *CubeModel.ClusterConfigSection, kinds []string) []securityPatchTarget {
 	wantAll := false
 	wants := map[string]bool{}
 	for _, kind := range kinds {
@@ -293,91 +324,147 @@ func gatherSecurityPatchTargets(cfg *CubeModel.ClusterConfigSection, kinds []str
 		}
 		wants[kind] = true
 	}
-	targets := map[string]struct{}{}
+	targets := map[string]string{}
 	if wantAll || wants["ablecube"] {
 		for _, host := range cfg.Hosts {
 			if ip := strings.TrimSpace(host.Ablecube); ip != "" {
-				targets[ip] = struct{}{}
+				targets[ip] = "ablecube"
 			}
 		}
 	}
 	if wantAll || wants["scvm"] {
 		for _, host := range cfg.Hosts {
 			if ip := strings.TrimSpace(host.Scvm); ip != "" {
-				targets[ip] = struct{}{}
+				if _, exists := targets[ip]; !exists {
+					targets[ip] = "scvm"
+				}
 			}
 		}
 	}
 	if wantAll || wants["ccvm"] {
 		if ip := strings.TrimSpace(cfg.CCVM.IP); ip != "" {
-			targets[ip] = struct{}{}
+			if _, exists := targets[ip]; !exists {
+				targets[ip] = "ccvm"
+			}
 		}
 	}
-	out := make([]string, 0, len(targets))
-	for target := range targets {
-		out = append(out, target)
+	out := make([]securityPatchTarget, 0, len(targets))
+	for ip, kind := range targets {
+		out = append(out, securityPatchTarget{IP: ip, Kind: kind})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left, lErr := netip.ParseAddr(out[i])
-		right, rErr := netip.ParseAddr(out[j])
+		left, lErr := netip.ParseAddr(out[i].IP)
+		right, rErr := netip.ParseAddr(out[j].IP)
 		if lErr == nil && rErr == nil {
 			return left.Less(right)
 		}
-		return out[i] < out[j]
+		return out[i].IP < out[j].IP
 	})
 	return out
 }
 
-func runSecurityPatchRemote(ip string, user string, connectPort int, newPort *int, dryRun bool, clusterType string, portChange bool) SecurityPatchTargetResult {
-	remote := fmt.Sprintf("%s@%s", user, ip)
-	remoteCmd := buildSecurityPatchCommandString(newPort, portChange, false)
-	sshCmd := []string{
-		"/usr/bin/ssh",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=" + securityPatchSSHConnectTO,
-		"-p", fmt.Sprintf("%d", connectPort),
-		remote,
-		remoteCmd,
+func securityPatchLocalTargetKind(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSection) string {
+	for _, kind := range req.Targets {
+		if kind == "ablecube" || kind == "scvm" || kind == "ccvm" {
+			return kind
+		}
 	}
+	localIPs := getSecurityPatchLocalIPv4s()
+	for _, target := range gatherSecurityPatchTargets(cfg, []string{"all"}) {
+		if _, ok := localIPs[target.IP]; ok {
+			return target.Kind
+		}
+	}
+	return "ablecube"
+}
 
+func runSecurityPatchRemoteAPI(ip string, targetKind string, req SecurityPatchRequest, clusterType string) SecurityPatchTargetResult {
+	apiURL := buildTargetURL(ip) + securityPatchAPIPath
+	scriptPath := securityPatchScriptPathForKind(targetKind)
 	result := SecurityPatchTargetResult{
 		IP:             ip,
-		ConnectPort:    &connectPort,
-		ChangeTo:       newPort,
+		TargetKind:     targetKind,
+		ScriptPath:     scriptPath,
+		ChangeTo:       req.NewPort,
 		SuccessPattern: securityPatchSuccessPattern,
 		ClusterType:    clusterType,
+		Transport:      "api",
+		APIURL:         apiURL,
 	}
-	if dryRun {
+	if req.DryRun {
 		result.OK = true
 		result.RC = 0
-		result.DryRunCmd = joinSecurityPatchCommand(sshCmd)
+		result.DryRunCmd = fmt.Sprintf("POST %s local=true target=%s command=%s", apiURL, targetKind, buildSecurityPatchCommandString(scriptPath, req.NewPort, req.PortChange, false))
 		result.RetriesPlanned = securityPatchMaxRetries
 		result.RetryDelaySec = securityPatchRetryDelaySec
 		return result
 	}
 
-	for attempt := 1; attempt <= securityPatchMaxRetries; attempt++ {
-		rc, stdout, stderr := runSecurityPatchCommand(sshCmd[0], sshCmd[1:]...)
-		result.RC = rc
-		result.Stderr = strings.TrimSpace(stderr)
-		result.Attempts = attempt
-		if rc == 0 || strings.Contains(stdout, securityPatchSuccessPattern) {
-			result.OK = true
-			result.SuccessAttempt = &attempt
-			break
-		}
-		if attempt < securityPatchMaxRetries {
-			time.Sleep(time.Duration(securityPatchRetryDelaySec) * time.Second)
-		}
+	localReq := req
+	localReq.Local = true
+	localReq.AddHost = false
+	localReq.UpdateJSONFile = false
+	localReq.CephSSHChange = false
+	localReq.Targets = []string{targetKind}
+	body, err := json.Marshal(localReq)
+	if err != nil {
+		result.RC = 1
+		result.Stderr = err.Error()
+		return result
 	}
+	httpReq, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		result.RC = 1
+		result.Stderr = err.Error()
+		return result
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	attachInternalToken(httpReq)
+	response, err := (&http.Client{Timeout: securityPatchAPITimeout}).Do(httpReq)
+	if err != nil {
+		result.RC = 1
+		result.Stderr = err.Error()
+		return result
+	}
+	defer response.Body.Close()
+	result.HTTPStatus = response.StatusCode
+	raw, readErr := io.ReadAll(response.Body)
+	if readErr != nil {
+		result.RC = 1
+		result.Stderr = readErr.Error()
+		return result
+	}
+	var envelope struct {
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Val     json.RawMessage `json:"val"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		result.RC = 1
+		result.Stderr = firstNonEmpty(strings.TrimSpace(string(raw)), err.Error())
+		return result
+	}
+	var value SecurityPatchValue
+	if err := json.Unmarshal(envelope.Val, &value); err == nil && len(value.Targets) > 0 {
+		localResult := value.Targets[0]
+		localResult.IP = ip
+		localResult.TargetKind = targetKind
+		localResult.IsLocal = false
+		localResult.Transport = "api"
+		localResult.APIURL = apiURL
+		localResult.HTTPStatus = response.StatusCode
+		return localResult
+	}
+	result.RC = 1
+	result.Stderr = firstNonEmpty(envelope.Message, strings.TrimSpace(string(envelope.Val)), response.Status)
 	return result
 }
 
-func runSecurityPatchLocal(newPort *int, dryRun bool, clusterType string, portChange bool, cephSSHChange bool) SecurityPatchTargetResult {
-	cmd := buildSecurityPatchCommandArgs(newPort, portChange, cephSSHChange)
+func runSecurityPatchLocal(newPort *int, dryRun bool, clusterType string, portChange bool, cephSSHChange bool, scriptPath string) SecurityPatchTargetResult {
+	cmd := buildSecurityPatchCommandArgs(scriptPath, newPort, portChange, cephSSHChange)
 	result := SecurityPatchTargetResult{
 		IP:             "127.0.0.1",
+		ScriptPath:     scriptPath,
 		ChangeTo:       newPort,
 		SuccessPattern: securityPatchSuccessPattern,
 		ClusterType:    clusterType,
@@ -395,6 +482,7 @@ func runSecurityPatchLocal(newPort *int, dryRun bool, clusterType string, portCh
 	for attempt := 1; attempt <= securityPatchMaxRetries; attempt++ {
 		rc, stdout, stderr := runSecurityPatchCommand(cmd[0], cmd[1:]...)
 		result.RC = rc
+		result.Stdout = strings.TrimSpace(stdout)
 		result.Stderr = strings.TrimSpace(stderr)
 		result.Attempts = attempt
 		if rc == 0 && strings.Contains(stdout, securityPatchSuccessPattern) {
@@ -409,8 +497,8 @@ func runSecurityPatchLocal(newPort *int, dryRun bool, clusterType string, portCh
 	return result
 }
 
-func buildSecurityPatchCommandArgs(newPort *int, portChange bool, cephSSHChange bool) []string {
-	cmd := []string{resolveSecurityPatchScriptPath()}
+func buildSecurityPatchCommandArgs(scriptPath string, newPort *int, portChange bool, cephSSHChange bool) []string {
+	cmd := []string{scriptPath}
 	if newPort != nil {
 		cmd = append(cmd, "-P", fmt.Sprintf("%d", *newPort))
 	}
@@ -423,15 +511,22 @@ func buildSecurityPatchCommandArgs(newPort *int, portChange bool, cephSSHChange 
 	return cmd
 }
 
-func buildSecurityPatchCommandString(newPort *int, portChange bool, cephSSHChange bool) string {
-	return joinSecurityPatchCommand(buildSecurityPatchCommandArgs(newPort, portChange, cephSSHChange))
+func buildSecurityPatchCommandString(scriptPath string, newPort *int, portChange bool, cephSSHChange bool) string {
+	return joinSecurityPatchCommand(buildSecurityPatchCommandArgs(scriptPath, newPort, portChange, cephSSHChange))
 }
 
-func resolveSecurityPatchScriptPath() string {
+func resolveSecurityPatchAblecubePath() string {
 	if path := strings.TrimSpace(os.Getenv("ABLESTACK_SECURITY_PATCH_SCRIPT")); path != "" {
 		return path
 	}
-	return securityPatchScriptPath
+	return securityPatchAblecubePath
+}
+
+func securityPatchScriptPathForKind(kind string) string {
+	if kind == "ablecube" {
+		return resolveSecurityPatchAblecubePath()
+	}
+	return securityPatchVMPath
 }
 
 func runSecurityPatchCommand(command string, args ...string) (int, string, string) {
@@ -459,73 +554,54 @@ func runSecurityPatchCommand(command string, args ...string) (int, string, strin
 }
 
 func updateSecurityPatchStatus(req SecurityPatchRequest, cfg *CubeModel.ClusterConfigSection) error {
-	configPath := computeSecurityPatchConfigPath(req.JSONPath)
 	if req.Local {
-		return runSecurityPatchStatusUpdateLocal(configPath)
+		return runSecurityPatchStatusUpdateLocal()
 	}
 	for _, host := range cfg.Hosts {
 		target := strings.TrimSpace(host.Ablecube)
 		if target == "" {
 			continue
 		}
-		if err := runSecurityPatchStatusUpdateRemote(configPath, target, req.SSHUser, req.SSHPort); err != nil {
+		if err := runSecurityPatchStatusUpdateAPI(target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runSecurityPatchStatusUpdateLocal(configPath string) error {
-	cmd := []string{
-		"python3",
-		filepath.Join(configPath, securityPatchAblestackJSONPy),
-		"update",
-		"--depth1", "security_patch",
-		"--depth2", "status",
-		"--value", "true",
+func runSecurityPatchStatusUpdateLocal() error {
+	root, err := loadClusterJSONRoot()
+	if err != nil {
+		return fmt.Errorf("read cluster.json: %w", err)
 	}
-	rc, _, stderr := runSecurityPatchCommand(cmd[0], cmd[1:]...)
-	if rc != 0 {
-		return fmt.Errorf("%s", firstNonEmpty(stderr, "security_patch.status update failed"))
+	profile, err := ensureSystemProfileMap(root)
+	if err != nil {
+		return fmt.Errorf("read systemProfile: %w", err)
 	}
-	return nil
-}
-
-func runSecurityPatchStatusUpdateRemote(configPath string, target string, user string, port int) error {
-	remote := fmt.Sprintf("%s@%s", user, target)
-	remoteArgs := []string{
-		"python3",
-		filepath.Join(configPath, securityPatchAblestackJSONPy),
-		"update",
-		"--depth1", "security_patch",
-		"--depth2", "status",
-		"--value", "true",
-	}
-	cmd := []string{
-		"/usr/bin/ssh",
-		"-o", "StrictHostKeyChecking=no",
-		"-p", fmt.Sprintf("%d", port),
-		remote,
-		joinSecurityPatchCommand(remoteArgs),
-	}
-	rc, _, stderr := runSecurityPatchCommand(cmd[0], cmd[1:]...)
-	if rc != 0 {
-		return fmt.Errorf("%s: %s", target, firstNonEmpty(stderr, "security_patch.status update failed"))
+	securityPatch := ensureMap(profile, "security_patch")
+	securityPatch["status"] = "true"
+	if err := saveClusterJSONRoot(root); err != nil {
+		return fmt.Errorf("save cluster.json: %w", err)
 	}
 	return nil
 }
 
-func resolveSecurityPatchStatusJSONPath() string {
-	return resolveAbleStackPropertyFile("ablestack.json")
-}
-
-func computeSecurityPatchConfigPath(jsonPath string) string {
-	clean := filepath.Clean(jsonPath)
-	dir := filepath.Dir(clean)
-	if filepath.Base(dir) == "properties" {
-		return filepath.Dir(dir)
+func runSecurityPatchStatusUpdateAPI(target string) error {
+	request := SystemConfigRequest{
+		Action: "update",
+		Depth1: "security_patch",
+		Depth2: "status",
+		Value:  "true",
 	}
-	return resolveAbleStackConfigPath()
+	var response SystemConfigResponse
+	status, err := deployRunPostJSON(target, securityPatchSystemAPIPath, request, securityPatchAPITimeout, &response)
+	if err != nil {
+		return fmt.Errorf("%s: %w", target, err)
+	}
+	if status != http.StatusOK || response.Code != http.StatusOK {
+		return fmt.Errorf("%s: %s", target, firstNonEmpty(strings.TrimSpace(fmt.Sprint(response.Val)), "security_patch.status update failed"))
+	}
+	return nil
 }
 
 func getSecurityPatchLocalIPv4s() map[string]struct{} {

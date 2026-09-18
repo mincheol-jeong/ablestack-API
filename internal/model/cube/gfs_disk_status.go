@@ -127,15 +127,18 @@ func HasGFSMultipathDevice(devices []GFSBlockDevice) bool {
 
 // BuildGFSDiskStatus는 GFS2 마운트, lsblk 트리, by-id 맵으로 API 응답 값을 만든다.
 func BuildGFSDiskStatus(devices []GFSBlockDevice, mounts []GFSMount, osType string, multipathMode bool, diskIDByKname map[string][]string, usageByMountpoint map[string]GFSDiskUsage) GFSDiskStatusValue {
-	mode := "single"
-	if multipathMode {
-		mode = "multi"
-	}
-
 	candidates := collectGFSDiskCandidates(devices, mounts, osType, multipathMode, diskIDByKname)
+	blockdevices := groupGFSDiskCandidates(candidates, multipathMode, usageByMountpoint)
+	mode := "single"
+	for _, device := range blockdevices {
+		if len(device.Multipaths) > 0 {
+			mode = "multi"
+			break
+		}
+	}
 	return GFSDiskStatusValue{
 		Mode:         mode,
-		Blockdevices: groupGFSDiskCandidates(candidates, multipathMode, usageByMountpoint),
+		Blockdevices: blockdevices,
 	}
 }
 
@@ -208,13 +211,14 @@ func buildGFSDiskCandidate(node GFSBlockDevice, ancestors []GFSBlockDevice, moun
 		LVM:        lvmPath,
 		Mountpoint: mount.Mountpoint,
 		Size:       size,
-		Multipaths: []string{multipathPath},
-		Devices:    []string{devicePath},
 	}
 
-	if multipathMode {
+	if multipathMode && hasMultipath {
+		entry.Multipaths = []string{multipathPath}
 		idKeyNames = append(idKeyNames, node.Kname)
 		entry.DiskID = collectGFSDiskIDs(idKeyNames, diskIDByKname)
+	} else {
+		entry.Devices = []string{devicePath}
 	}
 
 	return gfsDiskCandidate{
@@ -271,6 +275,9 @@ func groupGFSDiskCandidates(candidates []gfsDiskCandidate, multipathMode bool, u
 		sort.Strings(item.Multipaths)
 		sort.Strings(item.Devices)
 		sort.Strings(item.DiskID)
+		if len(item.DiskID) > 1 {
+			item.DiskID = item.DiskID[:1]
+		}
 		out = append(out, item)
 	}
 	return out

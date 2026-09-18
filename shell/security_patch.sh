@@ -90,7 +90,7 @@ update_ssh_scan_port() {
 
 #====================[ firewalld 서비스 보장 ]====================#
 ensure_firewalld() {
-  # firewall-cmd가 없으면 firewalld도 없다고 보고 스킵
+  # firewall-cmd가 없으면 firewalld도 없다고 보고 스킵합니다.
   if ! command -v firewall-cmd >/dev/null 2>&1; then
     return 0
   fi
@@ -100,22 +100,42 @@ ensure_firewalld() {
     return 0
   fi
 
+  # inactive(dead), failed 상태이면 firewalld를 시작합니다.
   if ! systemctl is-active --quiet firewalld 2>/dev/null; then
     echo "[INFO] firewalld 서비스가 비활성화되어 있어 시작합니다."
+
     if systemctl start firewalld 2>/dev/null; then
-      echo "[INFO] firewalld 시작 완료"
+      if systemctl is-active --quiet firewalld 2>/dev/null; then
+        echo "[INFO] firewalld 시작 완료"
+      else
+        echo "[WARN] firewalld start 명령은 성공했지만 active 상태가 아닙니다. 계속 진행합니다."
+        return 0
+      fi
     else
       echo "[WARN] firewalld 시작 실패 또는 서비스 없음. 계속 진행합니다."
       return 0
     fi
   fi
 
+  # 부팅 시 자동 시작 설정입니다.
   if ! systemctl is-enabled --quiet firewalld 2>/dev/null; then
     if systemctl enable firewalld >/dev/null 2>&1; then
       echo "[INFO] firewalld enable 완료"
     else
       echo "[WARN] firewalld enable 실패. 계속 진행합니다."
     fi
+  fi
+
+  # 혹시 모를 상태 반영 문제를 방지하기 위해 마지막에 재시작합니다.
+  echo "[INFO] firewalld 서비스를 재시작합니다."
+  if systemctl restart firewalld 2>/dev/null; then
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
+      echo "[INFO] firewalld 재시작 완료"
+    else
+      echo "[WARN] firewalld restart 명령은 성공했지만 active 상태가 아닙니다. 계속 진행합니다."
+    fi
+  else
+    echo "[WARN] firewalld 재시작 실패. 계속 진행합니다."
   fi
 }
 
@@ -170,9 +190,7 @@ if [[ -n "$SSH_PORT" ]]; then
   sed -i "s/^[#]*Port[[:space:]]\+[0-9]\+/Port ${SSH_PORT}/" "$SSHD_CONFIG" || true
   grep -qE '^[#]*Port[[:space:]]+[0-9]+' "$SSHD_CONFIG" || echo "Port ${SSH_PORT}" >> "$SSHD_CONFIG"
 
-  # PermitRootLogin/ClientAlive 통일
-  ensure_permit_root_login "$SSHD_CONFIG"
-
+  # ClientAlive 설정은 SSH 포트 변경 시에도 유지합니다.
   grep -q '^ClientAliveInterval' "$SSHD_CONFIG" \
     && sed -i 's/^ClientAliveInterval .*/ClientAliveInterval 0/' "$SSHD_CONFIG" \
     || echo 'ClientAliveInterval 0' >> "$SSHD_CONFIG"
@@ -181,7 +199,12 @@ if [[ -n "$SSH_PORT" ]]; then
     && sed -i 's/^ClientAliveCountMax .*/ClientAliveCountMax 3/' "$SSHD_CONFIG" \
     || echo 'ClientAliveCountMax 3' >> "$SSHD_CONFIG"
 
-  ensure_permit_root_login "$PERMITROOTLOGIN_CONF"
+  # --port-change는 포트 변경 전용이므로 PermitRootLogin은 건드리지 않습니다.
+  # 일반 보안 패치에서는 기존 정책(prohibit-password)을 그대로 적용합니다.
+  if [[ "$PORT_CHANGE_ONLY" != "true" ]]; then
+    ensure_permit_root_login "$SSHD_CONFIG"
+    ensure_permit_root_login "$PERMITROOTLOGIN_CONF"
+  fi
 
   # /root/.ssh/config 갱신
   cat > /root/.ssh/config <<EOF
@@ -636,6 +659,7 @@ declare -A files_permissions=(
     ["/etc/profile"]=755
     ["/etc/inittab"]=644
     ["/etc/snmp/snmpd.conf"]=644
+    ["/etc/systemd/system.conf"]=600
 )
 
 # 파일과 권한을 순회하면서 설정
@@ -679,6 +703,7 @@ add_umask_settings() {
             echo -e "\n$UMASK_SETTING" >> "$PROFILE_FILE"
             echo "$PROFILE_FILE 파일의 끝에 $UMASK_SETTING 설정이 추가되었습니다."
         fi
+        grep -qxF "export umask" "$PROFILE_FILE" || echo "export umask" >> "$PROFILE_FILE"
     else
         echo "$PROFILE_FILE 파일이 존재하지 않습니다."
     fi
@@ -816,6 +841,51 @@ else
     echo "$EXPORT_FILE 파일이 존재하지 않습니다."
 fi
 
+### U-34 Finger 서비스 비활성화
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now finger.service finger.socket >/dev/null 2>&1 || true
+fi
+
+shopt -s nullglob
+xinetd_files=(/etc/xinetd.d/*)
+if [ "${#xinetd_files[@]}" -eq 0 ]; then
+  echo "NOT_FOUND /etc/xinetd.d/*"
+else
+  for file in "${xinetd_files[@]}"; do
+    if [ -f "$file" ] && { [[ "$(basename "$file")" == finger* ]] || grep -qE '^[[:space:]]*service[[:space:]]+finger([[:space:]]|$)' "$file"; }; then
+      if grep -qE '^[[:space:]]*disable[[:space:]]*=' "$file"; then
+        sed -i 's/^[[:space:]]*disable[[:space:]]*=.*/        disable = yes/' "$file"
+      else
+        sed -i '/^[[:space:]]*}/i\\        disable = yes' "$file"
+      fi
+      echo "$file 파일의 Finger 서비스를 비활성화했습니다."
+    else
+      echo "$file 파일을 확인했습니다."
+    fi
+  done
+fi
+shopt -u nullglob
+
+### U-36 r 계열 서비스 설정 파일 존재 여부 확인
+for file in /etc/xinetd/ /etc/inetd.conf; do
+  if [ -e "$file" ]; then
+    ls -ld "$file"
+  else
+    echo "NOT_FOUND $file"
+  fi
+done
+
+shopt -s nullglob
+xinetd_files=(/etc/xinetd.d/*)
+if [ "${#xinetd_files[@]}" -eq 0 ]; then
+  echo "NOT_FOUND /etc/xinetd.d/*"
+else
+  for file in "${xinetd_files[@]}"; do
+    ls -ld "$file"
+  done
+fi
+shopt -u nullglob
+
 ### SUID, SGID 설정 및 권한 설정
 # U-23 불필요한 SGID/SUID 제거
 if [ -e "/usr/bin/newgrp" ]; then
@@ -849,6 +919,27 @@ for file in "${files[@]}"; do
   fi
 done
 
+### U-46 일반 사용자의 Postfix 큐 관리 명령 실행 방지
+POSTSUPER_FILE="/usr/sbin/postsuper"
+if [ -e "$POSTSUPER_FILE" ]; then
+  chmod a-x "$POSTSUPER_FILE"
+  echo "$POSTSUPER_FILE 파일의 모든 실행 권한을 제거했습니다."
+else
+  echo "NOT_FOUND $POSTSUPER_FILE"
+fi
+
+### U-48 Postfix VRFY 명령 제한
+if command -v postconf >/dev/null 2>&1; then
+  postconf -e 'disable_vrfy_command = yes'
+  echo "Postfix disable_vrfy_command 설정을 yes로 변경했습니다."
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet postfix 2>/dev/null; then
+    systemctl reload postfix
+    echo "postfix 서비스 설정을 다시 불러왔습니다."
+  fi
+else
+  echo "postconf NOT_FOUND"
+fi
+
 ### 로그온 시 경고 메시지 출력
 # 통일된 경고 문구를 /etc/motd, /etc/issue, /etc/issue.net 에 기록
 write_login_banner() {
@@ -870,37 +961,29 @@ echo "MOTD/issue/issue.net 파일에 경고 메시지를 추가했습니다."
 
 # sshd Banner 설정 반영 및 재시작
 BANNER_LINE="Banner /etc/issue.net"
-SSHD_BANNER_CONF="/etc/ssh/sshd_config.d/99-banner.conf"
 
-# Include 기반 설정이면 drop-in으로 강제, 아니면 sshd_config에 직접 반영
-if grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' "$SSHD_CONFIG" \
-  && [ -d /etc/ssh/sshd_config.d ]; then
-  printf '%s\n' "$BANNER_LINE" > "$SSHD_BANNER_CONF"
-  chmod 644 "$SSHD_BANNER_CONF" || true
-  echo "$SSHD_BANNER_CONF 파일에 배너 설정을 반영했습니다."
-else
-  if grep -qE '^[[:space:]]*Match[[:space:]]+' "$SSHD_CONFIG"; then
-    tmp_file="$(mktemp /tmp/sshd_config.XXXXXX)"
-    awk -v bl="$BANNER_LINE" '
-      BEGIN { done=0 }
-      {
-        if ($0 ~ /^[[:space:]]*#?[[:space:]]*Banner[[:space:]]+/) next
-        if (!done && $0 ~ /^[[:space:]]*Match[[:space:]]+/) {
-          print bl
-          done=1
-        }
-        print
+# U-62 증적에서 /etc/ssh/sshd_config 안의 Banner 경로를 직접 확인할 수 있도록 반영
+if grep -qE '^[[:space:]]*Match[[:space:]]+' "$SSHD_CONFIG"; then
+  tmp_file="$(mktemp /tmp/sshd_config.XXXXXX)"
+  awk -v bl="$BANNER_LINE" '
+    BEGIN { done=0 }
+    {
+      if ($0 ~ /^[[:space:]]*#?[[:space:]]*Banner[[:space:]]+/) next
+      if (!done && $0 ~ /^[[:space:]]*Match[[:space:]]+/) {
+        print bl
+        done=1
       }
-      END { if (!done) print bl }
-    ' "$SSHD_CONFIG" > "$tmp_file"
-    cat "$tmp_file" > "$SSHD_CONFIG"
-    rm -f "$tmp_file"
-    echo "$SSHD_CONFIG 파일에 배너 설정을 반영했습니다."
-  else
-    sed -i '/^[[:space:]]*#\?[[:space:]]*Banner[[:space:]]\+/d' "$SSHD_CONFIG"
-    echo "$BANNER_LINE" >> "$SSHD_CONFIG"
-    echo "$SSHD_CONFIG 파일에 배너 설정을 추가했습니다."
-  fi
+      print
+    }
+    END { if (!done) print bl }
+  ' "$SSHD_CONFIG" > "$tmp_file"
+  cat "$tmp_file" > "$SSHD_CONFIG"
+  rm -f "$tmp_file"
+  echo "$SSHD_CONFIG 파일에 배너 설정을 반영했습니다."
+else
+  sed -i '/^[[:space:]]*#\?[[:space:]]*Banner[[:space:]]\+/d' "$SSHD_CONFIG"
+  echo "$BANNER_LINE" >> "$SSHD_CONFIG"
+  echo "$SSHD_CONFIG 파일에 배너 설정을 추가했습니다."
 fi
 
 if sshd -t 2>/dev/null; then

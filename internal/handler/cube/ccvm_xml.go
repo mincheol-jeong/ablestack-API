@@ -150,9 +150,9 @@ func runCreateCCVMXML(cfg *CubeModel.ClusterConfigSection, req CCVMXMLCreateRequ
 	}
 	req.XMLContent = content
 
-	installTargets := ccvmXMLInstallTargets(cfg)
+	installTargets, installTargetField := ccvmXMLInstallTargets(cfg)
 	if len(installTargets) == 0 {
-		return ccvmXMLCreateError("hosts[].ablecubePn required", results)
+		return ccvmXMLCreateError(installTargetField+" required", results)
 	}
 	installResults := fanoutCCVMXMLLocal(installTargets, ccvmXMLModeInstall, req)
 	results = append(results, installResults...)
@@ -380,17 +380,27 @@ func ccvmXMLAblecubeTargets(cfg *CubeModel.ClusterConfigSection) []string {
 	return dedupeHosts(targets)
 }
 
-func ccvmXMLInstallTargets(cfg *CubeModel.ClusterConfigSection) []string {
+func ccvmXMLInstallTargets(cfg *CubeModel.ClusterConfigSection) ([]string, string) {
 	if cfg == nil {
-		return nil
+		return nil, "hosts[].ablecubePn"
+	}
+	useAblecube := strings.EqualFold(strings.TrimSpace(cfg.Type), "ablestack-vm") &&
+		!strings.EqualFold(strings.TrimSpace(cfg.StorageNetwork), "true")
+	targetField := "hosts[].ablecubePn"
+	if useAblecube {
+		targetField = "hosts[].ablecube"
 	}
 	targets := make([]string, 0, len(cfg.Hosts))
 	for _, host := range cfg.Hosts {
-		if target := strings.TrimSpace(host.AblecubePn); target != "" {
+		target := host.AblecubePn
+		if useAblecube {
+			target = host.Ablecube
+		}
+		if target = strings.TrimSpace(target); target != "" {
 			targets = append(targets, target)
 		}
 	}
-	return dedupeHosts(targets)
+	return dedupeHosts(targets), targetField
 }
 
 func isCCVMXMLHCI(cfg *CubeModel.ClusterConfigSection) bool {

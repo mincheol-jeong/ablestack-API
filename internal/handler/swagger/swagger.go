@@ -13,15 +13,16 @@ import (
 
 	"ablecloud.io/ablestack-api/docs"
 	GlueHandler "ablecloud.io/ablestack-api/internal/handler/glue"
+	MoldHandler "ablecloud.io/ablestack-api/internal/handler/mold"
 )
 
 // Handler는 Swagger UI asset은 gin-swagger에 맡기고 doc.json만 role에 맞게 필터링한다.
-// host/CCVM에서는 Glue를 숨기고, SCVM에서는 Glue 중심으로 보이도록 Cube 운영 API를 숨긴다.
+// host에서는 Glue/Mold를 숨기고, CCVM에서는 Mold를 보이며, SCVM에서는 Glue 중심으로 보이도록 Cube 운영 API를 숨긴다.
 func Handler() gin.HandlerFunc {
 	ui := ginSwagger.WrapHandler(swaggerFiles.Handler)
 	return func(ctx *gin.Context) {
 		if strings.HasSuffix(ctx.Request.URL.Path, "/doc.json") {
-			doc, err := FilterDocForSCVM(docs.SwaggerInfo.ReadDoc(), GlueHandler.IsSCVMNode())
+			doc, err := FilterDocForNode(docs.SwaggerInfo.ReadDoc(), GlueHandler.IsSCVMNode(), MoldHandler.IsCCVMNode())
 			if err != nil {
 				ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 				return
@@ -34,6 +35,10 @@ func Handler() gin.HandlerFunc {
 }
 
 func FilterDocForSCVM(raw string, scvm bool) ([]byte, error) {
+	return FilterDocForNode(raw, scvm, false)
+}
+
+func FilterDocForNode(raw string, scvm bool, ccvm bool) ([]byte, error) {
 	var doc map[string]any
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	decoder.UseNumber()
@@ -41,12 +46,18 @@ func FilterDocForSCVM(raw string, scvm bool) ([]byte, error) {
 		return nil, err
 	}
 
+	if !ccvm {
+		removeMoldPaths(doc)
+	}
 	if scvm {
 		removeSCVMHiddenCubePaths(doc)
 		orderSCVMTags(doc)
 	} else {
 		removeGluePaths(doc)
 		removeGlueTags(doc)
+	}
+	if !ccvm {
+		removeMoldTags(doc)
 	}
 	pruneUnreferencedDefinitions(doc)
 
@@ -85,6 +96,39 @@ func removeGlueTags(doc map[string]any) {
 		}
 		name, _ := tag["name"].(string)
 		if strings.HasPrefix(name, "Glue") {
+			continue
+		}
+		tags = append(tags, rawTag)
+	}
+	doc["tags"] = tags
+}
+
+func removeMoldPaths(doc map[string]any) {
+	paths, ok := doc["paths"].(map[string]any)
+	if !ok {
+		return
+	}
+	for path := range paths {
+		if path == "/mold" || strings.HasPrefix(path, "/mold/") {
+			delete(paths, path)
+		}
+	}
+}
+
+func removeMoldTags(doc map[string]any) {
+	rawTags, ok := doc["tags"].([]any)
+	if !ok {
+		return
+	}
+	tags := make([]any, 0, len(rawTags))
+	for _, rawTag := range rawTags {
+		tag, ok := rawTag.(map[string]any)
+		if !ok {
+			tags = append(tags, rawTag)
+			continue
+		}
+		name, _ := tag["name"].(string)
+		if strings.HasPrefix(name, "Mold") {
 			continue
 		}
 		tags = append(tags, rawTag)

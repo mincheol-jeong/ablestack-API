@@ -271,12 +271,18 @@ func listCLVMManageDisks() ([]CLVMManageDisk, error) {
 			}
 			diskName := resetCloudCenterBaseDisk(filepath.Base(pv.PVName))
 			wwn := firstNonEmpty(wwnByName[diskName], wwnByName[dmName], "N/A")
+			uuid := firstNonEmpty(diskUUIDFromID(diskID), wwn, "N/A")
+			pathMode := "single"
+			if multipathUUID(diskID) != "" {
+				pathMode = "multipath"
+			}
 			out = append(out, CLVMManageDisk{
-				VGName: pv.VGName,
-				PVName: pv.PVName,
-				PVSize: parseCLVMManageSize(pv.PVSize),
-				WWN:    wwn,
-				DiskID: diskID,
+				VGName:   pv.VGName,
+				PVName:   pv.PVName,
+				PVSize:   parseCLVMManageSize(pv.PVSize),
+				UUID:     uuid,
+				PathMode: pathMode,
+				DiskID:   diskID,
 			})
 		}
 	}

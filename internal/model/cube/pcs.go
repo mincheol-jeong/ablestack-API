@@ -17,6 +17,10 @@ type CCVMPCSControlRequest struct {
 	Target string `json:"target,omitempty" example:"ablecube31-2"`
 	// cluster token time for sync action
 	Time string `json:"time,omitempty" example:"3000"`
+	// setup 내부 호출에서 PCS 리소스를 생성만 하고 시작하지 않음
+	CreateOnly bool `json:"create_only,omitempty" swaggerignore:"true"`
+	// create 내부 호출에서 PCS 리소스를 비활성 상태로 생성
+	Disabled bool `json:"disabled,omitempty" swaggerignore:"true"`
 }
 
 // CCVMPCSNodeStatus는 pcs status xml의 노드 상태이다.

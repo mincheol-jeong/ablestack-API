@@ -29,7 +29,9 @@ type GFSResourceStatusValue struct {
 type GFSResourceStatusGroups struct {
 	FenceResources       []map[string]string `json:"fence_resources"`
 	GlueLockingResources []map[string]string `json:"glue_locking_resources"`
-	GlueGFSResources     []map[string]string `json:"glue_gfs_resources"`
+	GFSMountResources    []map[string]string `json:"gfs_mount_resources"`
+	// GlueGFSResources는 기존 클라이언트 호환을 위한 alias이다.
+	GlueGFSResources []map[string]string `json:"glue_gfs_resources"`
 }
 
 // GFSNodeResourceHistories는 특정 노드의 리소스 operation history 목록이다.
@@ -117,6 +119,7 @@ func ParseGFSResourceStatusXML(data []byte) (GFSResourceStatusValue, error) {
 	resources := GFSResourceStatusGroups{
 		FenceResources:       []map[string]string{},
 		GlueLockingResources: []map[string]string{},
+		GFSMountResources:    []map[string]string{},
 		GlueGFSResources:     []map[string]string{},
 	}
 
@@ -150,10 +153,11 @@ func ParseGFSResourceStatusXML(data []byte) (GFSResourceStatusValue, error) {
 			continue
 		}
 
-		if strings.HasPrefix(resourceID, "glue-gfs") {
-			resources.GlueGFSResources = appendResourceForRunningNodes(resources.GlueGFSResources, attrs, resource.Node)
+		if isGFSMountResource(resourceID) {
+			resources.GFSMountResources = appendResourceForRunningNodes(resources.GFSMountResources, attrs, resource.Node)
 		}
 	}
+	resources.GlueGFSResources = copyResourceMaps(resources.GFSMountResources)
 
 	nodeHistory := buildGFSNodeHistory(status.NodeHistory.Node)
 	sort.SliceStable(nodeHistory, func(i, j int) bool {
@@ -197,6 +201,18 @@ func collectGFSFenceNodeByResource(bans []gfsPCSBanXML) map[string]string {
 
 func isGFSGlueLockingResource(resourceID string) bool {
 	return resourceID == "glue-dlm" || resourceID == "glue-lvmlockd"
+}
+
+func isGFSMountResource(resourceID string) bool {
+	return resourceID == "glue-gfs" || resourceID == "glue-gfs_res"
+}
+
+func copyResourceMaps(resources []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(resources))
+	for _, resource := range resources {
+		out = append(out, copyStringMap(resource))
+	}
+	return out
 }
 
 func appendResourceForRunningNodes(out []map[string]string, attrs map[string]string, nodes []gfsPCSNodeXML) []map[string]string {

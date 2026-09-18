@@ -2,7 +2,7 @@
 %global config_root %{_sysconfdir}/ablestack
 %global state_root %{config_root}/vmconfig
 %global log_root %{_localstatedir}/log/ablestack
-%global api_port 8090
+%{!?api_port:%global api_port 18090}
 %global debug_package %{nil}
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
@@ -23,11 +23,15 @@ BuildRequires:  systemd-rpm-macros
 Requires:       systemd
 Requires:       bash
 Requires:       python3
+Requires:       openssh-clients
 Recommends:     firewalld
-# Role-specific runtime commands such as ceph, rbd, podman, samba, realmd,
-# pcs, and virsh are intentionally not hard dependencies. The same API RPM is
-# installed on host, SCVM, and CCVM, and those commands are required only when
-# the matching role-specific API is executed.
+# yescrypt and legacy crypt verification are statically linked Go modules and
+# do not add runtime RPM dependencies. python3 remains for packaged evidence,
+# Samba, and shell helper workflows, not Linux account authentication.
+# Role-specific runtime commands and assets such as ceph, rbd, podman, samba,
+# realmd, pcs, virsh, and the CCVM Wall Python runtime are intentionally not
+# hard dependencies. The same API RPM is installed on host, SCVM, and CCVM,
+# and those components are required only when the matching role API runs.
 Requires(post): systemd
 Requires(post): python3
 Requires(preun): systemd
@@ -40,6 +44,13 @@ ABLESTACK API server and managed configuration files.
 %autosetup -n %{name}-%{version}
 
 %build
+case "%{api_port}" in
+    ''|*[!0-9]*) echo "invalid api_port: %{api_port}" >&2; exit 2 ;;
+esac
+if [ "%{api_port}" -lt 1 ] || [ "%{api_port}" -gt 65535 ]; then
+    echo "api_port must be between 1 and 65535: %{api_port}" >&2
+    exit 2
+fi
 export GO111MODULE=on
 export CGO_ENABLED=1
 if [ -d vendor ]; then
@@ -50,7 +61,8 @@ go build -buildvcs=false -trimpath -ldflags "-s -w" -o ablestack-auth-token ./cm
 
 %check
 %if %{with tests}
-go test ./internal/model/cube ./internal/service/clusterconfig ./internal/service/authservice ./internal/infra/logging ./cmd/authtoken ./docs
+go vet ./...
+go test ./...
 %endif
 
 %install
@@ -58,10 +70,19 @@ install -Dpm 0755 %{name} %{buildroot}%{_bindir}/%{name}
 install -Dpm 0755 ablestack-auth-token %{buildroot}%{_bindir}/ablestack-auth-token
 install -Dpm 0644 packaging/systemd/%{service_name}.service %{buildroot}%{_unitdir}/%{service_name}.service
 install -Dpm 0755 packaging/scripts/merge-json-defaults.py %{buildroot}%{_libexecdir}/%{name}/merge-json-defaults.py
+install -Dpm 0755 packaging/scripts/configure-api-port.sh %{buildroot}%{_libexecdir}/%{name}/configure-api-port.sh
+install -d %{buildroot}%{_libexecdir}/%{name}/python/security_evidence
+install -pm 0644 security-evidence/python/security_evidence/__init__.py %{buildroot}%{_libexecdir}/%{name}/python/security_evidence/
+install -pm 0755 security-evidence/python/security_evidence/security_evidence.py %{buildroot}%{_libexecdir}/%{name}/python/security_evidence/
+install -pm 0755 security-evidence/python/security_evidence/security_evidence_package.py %{buildroot}%{_libexecdir}/%{name}/python/security_evidence/
+install -d %{buildroot}%{_libexecdir}/%{name}/tools/security_evidence
+install -pm 0644 security-evidence/tools/security_evidence/checks.json %{buildroot}%{_libexecdir}/%{name}/tools/security_evidence/
+install -Dpm 0755 shell/security_patch.sh %{buildroot}%{_libexecdir}/%{name}/shell/security_patch.sh
 
 	install -d %{buildroot}%{config_root}
 	install -Dpm 0600 configs/auth.json %{buildroot}%{config_root}/auth.json
 	install -Dpm 0644 packaging/config/ablestack-api.env %{buildroot}%{config_root}/ablestack-api.env
+	sed -i 's/^ABLESTACK_API_PORT=.*/ABLESTACK_API_PORT=%{api_port}/' %{buildroot}%{config_root}/ablestack-api.env
 
 install -d %{buildroot}%{config_root}/properties
 install -pm 0644 properties/* %{buildroot}%{config_root}/properties/
@@ -112,32 +133,47 @@ PY
 }
 remove_auth_legacy_secret
 
-configure_firewall() {
-    if ! command -v firewall-cmd >/dev/null 2>&1; then
-        return 0
-    fi
-
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable --now firewalld.service >/dev/null 2>&1 || :
-    fi
-
-    firewall-cmd --permanent --add-port=%{api_port}/tcp >/dev/null 2>&1 || :
-    firewall-cmd --add-port=%{api_port}/tcp >/dev/null 2>&1 || :
-    firewall-cmd --reload >/dev/null 2>&1 || :
-}
-configure_firewall
-
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl daemon-reload >/dev/null 2>&1 || :
-    systemctl enable --now %{service_name}.service >/dev/null 2>&1 || :
-    if [ "$1" -gt 1 ]; then
-        systemctl try-restart %{service_name}.service >/dev/null 2>&1 || :
-    fi
+desired_api_port="%{api_port}"
+if [ "$1" -gt 1 ] && [ -f "%{config_root}/ablestack-api.env" ]; then
+    configured_api_port="$(sed -n 's/^[[:space:]]*ABLESTACK_API_PORT[[:space:]]*=[[:space:]]*//p' "%{config_root}/ablestack-api.env" | tail -n 1)"
+    configured_api_port="${configured_api_port%\"}"
+    configured_api_port="${configured_api_port#\"}"
+    configured_api_port="${configured_api_port%\'}"
+    configured_api_port="${configured_api_port#\'}"
+    case "$configured_api_port" in
+        ''|*[!0-9]*) ;;
+        *)
+            if [ "$configured_api_port" -ge 1 ] && [ "$configured_api_port" -le 65535 ]; then
+                desired_api_port="$configured_api_port"
+            fi
+            ;;
+    esac
 fi
+
+%{_libexecdir}/%{name}/configure-api-port.sh \
+    "%{config_root}/ablestack-api.env" \
+    "%{service_name}.service" \
+    "$desired_api_port" \
+    "%{config_root}/.%{name}-port" \
+    "$1"
 
 %preun
 if [ "$1" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now %{service_name}.service >/dev/null 2>&1 || :
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        api_port=""
+        if [ -f "%{config_root}/.%{name}-port" ]; then
+            IFS= read -r api_port < "%{config_root}/.%{name}-port" || :
+        fi
+        case "$api_port" in
+            ''|*[!0-9]*) ;;
+            *)
+                firewall-cmd --permanent --remove-port="${api_port}/tcp" >/dev/null 2>&1 || :
+                firewall-cmd --remove-port="${api_port}/tcp" >/dev/null 2>&1 || :
+                ;;
+        esac
+    fi
+    rm -f "%{config_root}/.%{name}-port" || :
 fi
 
 %postun
@@ -152,6 +188,17 @@ fi
 %{_bindir}/ablestack-auth-token
 %{_unitdir}/%{service_name}.service
 	%{_libexecdir}/%{name}/merge-json-defaults.py
+	%{_libexecdir}/%{name}/configure-api-port.sh
+	%dir %{_libexecdir}/%{name}/python
+	%dir %{_libexecdir}/%{name}/python/security_evidence
+	%{_libexecdir}/%{name}/python/security_evidence/__init__.py
+	%{_libexecdir}/%{name}/python/security_evidence/security_evidence.py
+	%{_libexecdir}/%{name}/python/security_evidence/security_evidence_package.py
+	%dir %{_libexecdir}/%{name}/tools
+	%dir %{_libexecdir}/%{name}/tools/security_evidence
+	%{_libexecdir}/%{name}/tools/security_evidence/checks.json
+	%dir %{_libexecdir}/%{name}/shell
+	%{_libexecdir}/%{name}/shell/security_patch.sh
 	%dir %{config_root}
 	%config(noreplace) %attr(0600,root,root) %{config_root}/auth.json
 	%config(noreplace) %{config_root}/ablestack-api.env

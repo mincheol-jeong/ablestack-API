@@ -23,7 +23,7 @@ type SecurityPatchRequest struct {
 	PortChange bool `json:"port_change,omitempty" example:"false"`
 	// security_patch.status=true 업데이트만 수행한다.
 	UpdateJSONFile bool `json:"update_json_file,omitempty" example:"false"`
-	// update_json_file 사용 시 현재 호스트에서만 JSON을 업데이트한다.
+	// 내부 fan-out 요청에서 현재 노드만 실행한다. update_json_file에도 동일하게 적용된다.
 	Local bool `json:"local,omitempty" example:"false"`
 	// security_patch.sh --ceph-ssh-change를 로컬에서 한 번만 실행한다.
 	CephSSHChange bool `json:"ceph_ssh_change,omitempty" example:"false"`
@@ -33,6 +33,8 @@ type SecurityPatchRequest struct {
 // @name SecurityPatchTargetResult
 type SecurityPatchTargetResult struct {
 	IP             string `json:"ip"`
+	TargetKind     string `json:"targetKind,omitempty"`
+	ScriptPath     string `json:"scriptPath,omitempty"`
 	ConnectPort    *int   `json:"connectPort,omitempty"`
 	ChangeTo       *int   `json:"changeTo,omitempty"`
 	OK             bool   `json:"ok"`
@@ -47,6 +49,9 @@ type SecurityPatchTargetResult struct {
 	SuccessPattern string `json:"successPattern"`
 	ClusterType    string `json:"clusterType"`
 	IsLocal        bool   `json:"isLocal,omitempty"`
+	Transport      string `json:"transport,omitempty" example:"api"`
+	APIURL         string `json:"apiUrl,omitempty" example:"http://10.10.31.1:18090/api/v1/cube/security/patch"`
+	HTTPStatus     int    `json:"httpStatus,omitempty" example:"200"`
 }
 
 // SecurityPatchSummary는 security patch 전체 실행 요약이다.

@@ -48,6 +48,14 @@ type HTTP404NotFound struct {
 	Message string `json:"message" example:"Not Found"`
 } //@name HTTP404NotFound
 
+// HTTP409Conflict
+// @description
+type HTTP409Conflict struct {
+	HTTPError
+	ErrCode int    `json:"err_code" example:"409"`
+	Message string `json:"message" example:"Conflict"`
+} //@name HTTP409Conflict
+
 // HTTP500InternalServerError
 // @description
 type HTTP500InternalServerError struct {

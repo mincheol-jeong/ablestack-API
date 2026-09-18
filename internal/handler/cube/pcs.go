@@ -33,16 +33,21 @@ const (
 	ccvmPCSSetupWaitTimeout       = 25 * time.Minute
 	ccvmPCSSetupPollInterval      = 5 * time.Second
 	ccvmPCSSetupCronPath          = "/var/spool/cron/root"
-	ccvmPCSSetupCronTmpPath       = "/var/spool/cron/tmpfile"
 	ccvmPCSSetupCronMarker        = "create_ccvm_snap.py"
 	ccvmPCSSetupFilesystemOSType  = "ablestack-hci-filesystem"
 	ccvmPCSSetupClusterConfigType = "ablestack-hci"
+	ccvmPCSSetupVMOSType          = "ablestack-vm"
+	ccvmPCSSetupVMTemplatePath    = "/var/lib/libvirt/images/ablestack-template.qcow2"
+	ccvmPCSSetupVMRuntimeDir      = "/mnt/glue-gfs"
+	ccvmPCSSetupVMImagePath       = "/mnt/glue-gfs/ccvm.qcow2"
+	ccvmPCSSetupVMXMLPath         = "/mnt/glue-gfs/ccvm.xml"
+	ccvmPCSSetupVMResizeSize      = "+350G"
 )
 
 // CCVMPCSControl godoc
 //
 //	@Summary		PCS Control
-//	@Description	CCVM Pacemaker/PCS setup/config/create/enable/disable/move/cleanup/status/remove/destroy/stop/sync/ccvm-status 작업을 수행합니다. setup은 cluster.json의 clusterConfig.pcsCluster 노드에 CCVM 스냅샷 cron을 배포한 뒤 cloudcenter_res를 구성합니다.
+//	@Description	CCVM Pacemaker/PCS setup/config/create/enable/disable/move/cleanup/status/remove/destroy/stop/sync/ccvm-status 작업을 수행합니다. setup은 clusterConfig.pcsCluster 노드의 기존 Python 스냅샷 cron을 정리한 뒤 cloudcenter_res를 구성합니다. 자동 스냅샷은 API 내부 Go 스케줄러가 수행합니다.
 //	@Tags			Cube-PCS
 //	@Accept			json
 //	@Produce		json
@@ -244,7 +249,7 @@ func runCCVMPCSLocal(req CCVMPCSControlRequest, target string) CCVMPCSControlRes
 }
 
 // setupCCVMPCS는 외부 setup 요청의 오케스트레이션을 담당한다.
-// SSH 대신 cluster.json의 pcsCluster 노드 API를 호출해서 각 노드가 자기 로컬 cron을 직접 수정하게 한다.
+// 각 노드 API를 호출해 기존 Python snapshot cron을 정리한 뒤 PCS 구성을 수행한다.
 func setupCCVMPCS(req CCVMPCSControlRequest, cfg *CubeModel.ClusterConfigSection) CCVMPCSControlResponse {
 	targets := buildPCSExecutionTargets(cfg)
 	if len(targets) == 0 {
@@ -259,7 +264,7 @@ func setupCCVMPCS(req CCVMPCSControlRequest, cfg *CubeModel.ClusterConfigSection
 		if resp.Code != http.StatusOK {
 			return ccvmPCSError(req, firstNonEmpty(target.Target, "local"), http.StatusInternalServerError, map[string]any{
 				"cron": cronResults,
-			}, firstNonEmpty(resp.Message, "ccvm snapshot cron setup failed"))
+			}, firstNonEmpty(resp.Message, "legacy ccvm snapshot cron cleanup failed"))
 		}
 	}
 
@@ -329,7 +334,7 @@ func setupCCVMPCSLocal(req CCVMPCSControlRequest, target string) CCVMPCSControlR
 	if err != nil {
 		return ccvmPCSError(req, target, http.StatusInternalServerError, ccvmPCSSetupFailureMessage, err.Error())
 	}
-	if err := setupCCVMPCSLocalSteps(target, cfg); err != nil {
+	if err := setupCCVMPCSLocalSteps(target, cfg, !req.CreateOnly); err != nil {
 		return ccvmPCSError(req, target, http.StatusInternalServerError, ccvmPCSSetupFailureMessage, err.Error())
 	}
 	return ccvmPCSOK(req, target, ccvmPCSSetupSuccessMessage)
@@ -339,32 +344,43 @@ func setupCCVMPCSCronLocal(req CCVMPCSControlRequest, target string) CCVMPCSCont
 	if err := setupCCVMSnapshotCronLocal(); err != nil {
 		return ccvmPCSError(req, target, http.StatusInternalServerError, err.Error(), err.Error())
 	}
-	return ccvmPCSOK(req, target, "ccvm snapshot cron setup success")
+	return ccvmPCSOK(req, target, "legacy ccvm snapshot cron cleanup success")
 }
 
 // setupCCVMPCSLocalSteps는 Python setupPcsCluster의 로컬 작업을 Go 명령 실행으로 대체한다.
-// 실제 PCS 리소스 생성은 한 노드에서만 실행하고, cron 배포는 setupCCVMPCS에서 별도로 fan-out 한다.
-func setupCCVMPCSLocalSteps(target string, cfg *CubeModel.ClusterConfigSection) error {
+// 실제 PCS 리소스 생성은 한 노드에서만 실행하고, legacy cron 정리는 setupCCVMPCS에서 별도로 fan-out 한다.
+func setupCCVMPCSLocalSteps(target string, cfg *CubeModel.ClusterConfigSection, start bool) error {
 	if cfg == nil {
 		return fmt.Errorf("clusterConfig not found")
 	}
 
-	clusterType := strings.TrimSpace(cfg.Type)
+	clusterType := strings.ToLower(strings.TrimSpace(cfg.Type))
+	resourceXMLPath := filepath.Join(resolveAbleStackVMConfigDir("ccvm"), "ccvm.xml")
+
+	if clusterType == ccvmPCSSetupVMOSType {
+		if err := prepareCCVMPCSVMSetup(); err != nil {
+			return err
+		}
+		resourceXMLPath = ccvmPCSSetupVMXMLPath
+	}
+
 	if clusterType == ccvmPCSSetupFilesystemOSType {
 		if err := prepareCCVMPCSFilesystemSetup(target); err != nil {
 			return err
 		}
 	}
 
-	if _, err := runPCSCommand(
-		ccvmPCSSetupCommandTimeout,
-		"qemu-img",
-		"convert", "-f", "qcow2", "-O", "rbd", ccvmPCSSetupTemplatePath, ccvmPCSSetupQemuRBDTarget,
-	); err != nil {
-		return err
-	}
-	if _, err := runPCSCommand(ccvmPCSSetupCommandTimeout, "rbd", "resize", "-s", ccvmPCSSetupImageSize, ccvmPCSSetupRBDImageSpec); err != nil {
-		return err
+	if clusterType == ccvmPCSSetupClusterConfigType || clusterType == ccvmPCSSetupFilesystemOSType {
+		if _, err := runPCSCommand(
+			ccvmPCSSetupCommandTimeout,
+			"qemu-img",
+			"convert", "-f", "qcow2", "-O", "rbd", ccvmPCSSetupTemplatePath, ccvmPCSSetupQemuRBDTarget,
+		); err != nil {
+			return err
+		}
+		if _, err := runPCSCommand(ccvmPCSSetupCommandTimeout, "rbd", "resize", "-s", ccvmPCSSetupImageSize, ccvmPCSSetupRBDImageSpec); err != nil {
+			return err
+		}
 	}
 
 	if clusterType == ccvmPCSSetupClusterConfigType {
@@ -385,18 +401,55 @@ func setupCCVMPCSLocalSteps(target string, cfg *CubeModel.ClusterConfigSection) 
 	resp := createCCVMPCSResource(CCVMPCSControlRequest{
 		Action:   "create",
 		Resource: pcsDefaultResourceID,
-		XML:      filepath.Join(resolveAbleStackVMConfigDir("ccvm"), "ccvm.xml"),
+		XML:      resourceXMLPath,
+		Disabled: !start,
 	}, target)
 	if resp.Code != http.StatusOK {
 		return fmt.Errorf("pcs resource create failed: %s", firstNonEmpty(resp.Message, fmt.Sprint(resp.Val)))
 	}
 
-	// GFS가 먼저 올라온 뒤 CCVM 리소스가 시작되도록 순서를 고정한다.
-	if _, err := runPCSCommand(pcsCommandTimeout, "pcs", "constraint", "order", "start", "glue-gfs-clone", "then", pcsDefaultResourceID); err != nil {
-		return err
+	if clusterType == ccvmPCSSetupVMOSType || clusterType == ccvmPCSSetupFilesystemOSType {
+		// GFS가 먼저 올라온 뒤 CCVM 리소스가 시작되도록 순서를 고정한다.
+		if _, err := runPCSCommand(pcsCommandTimeout, "pcs", "constraint", "order", "start", "glue-gfs-clone", "then", pcsDefaultResourceID); err != nil {
+			return err
+		}
 	}
 
-	return waitForCCVMPCSDomain(ccvmPCSSetupWaitTimeout)
+	if !start {
+		return nil
+	}
+	_, err := waitForCCVMPCSResourceStarted(pcsDefaultResourceID, ccvmPCSSetupWaitTimeout)
+	return err
+}
+
+func prepareCCVMPCSVMSetup() error {
+	if _, err := runPCSCommand(ccvmPCSSetupCommandTimeout, "mountpoint", "-q", ccvmPCSSetupVMRuntimeDir); err != nil {
+		return fmt.Errorf("gfs mount point is not mounted: %s", ccvmPCSSetupVMRuntimeDir)
+	}
+
+	sourceXML := filepath.Join(resolveAbleStackVMConfigDir("ccvm"), "ccvm.xml")
+	if err := requireRegularFile(sourceXML, "ccvm xml not found"); err != nil {
+		return err
+	}
+	if err := copySCVMLifecycleFile(sourceXML, ccvmPCSSetupVMXMLPath, 0o644); err != nil {
+		return fmt.Errorf("prepare shared ccvm xml: %w", err)
+	}
+
+	if _, err := os.Stat(ccvmPCSSetupVMImagePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := requireRegularFile(ccvmPCSSetupVMTemplatePath, "ccvm template image not found"); err != nil {
+		return err
+	}
+	if err := copySCVMLifecycleFile(ccvmPCSSetupVMTemplatePath, ccvmPCSSetupVMImagePath, 0o666); err != nil {
+		return fmt.Errorf("prepare shared ccvm image: %w", err)
+	}
+	if _, err := runPCSCommand(ccvmPCSSetupCommandTimeout, "qemu-img", "resize", ccvmPCSSetupVMImagePath, ccvmPCSSetupVMResizeSize); err != nil {
+		return err
+	}
+	return nil
 }
 
 func prepareCCVMPCSFilesystemSetup(target string) error {
@@ -449,75 +502,44 @@ func ccvmPCSSetupClusterHosts(cfg *CubeModel.ClusterConfigSection) []string {
 	return cfg.PCSCluster.HostnameList()
 }
 
-// setupCCVMSnapshotCronLocal은 현재 노드의 root crontab에서 기존 CCVM 스냅샷 줄을 제거한 뒤 한 줄만 등록한다.
+// setupCCVMSnapshotCronLocal은 Go scheduler와 중복되는 기존 Python snapshot cron을 제거한다.
 func setupCCVMSnapshotCronLocal() error {
-	if err := os.MkdirAll(filepath.Dir(ccvmPCSSetupCronPath), 0755); err != nil {
-		return err
-	}
-	if err := os.Remove(ccvmPCSSetupCronTmpPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	raw, err := os.ReadFile(ccvmPCSSetupCronPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	content := buildCCVMPCSSetupCronContent(string(raw))
-
-	if err := os.WriteFile(ccvmPCSSetupCronTmpPath, []byte(content), 0600); err != nil {
-		return err
-	}
-	if err := os.Rename(ccvmPCSSetupCronTmpPath, ccvmPCSSetupCronPath); err != nil {
-		_ = os.Remove(ccvmPCSSetupCronTmpPath)
-		return err
-	}
-	if err := os.Chmod(ccvmPCSSetupCronPath, 0600); err != nil {
-		return err
-	}
-	_, err = runPCSCommand(pcsCommandTimeout, "systemctl", "restart", "crond.service")
-	return err
+	return cleanupLegacyPythonCrontab(ccvmPCSSetupCronMarker)
 }
 
-func buildCCVMPCSSetupCronContent(raw string) string {
-	raw = strings.ReplaceAll(raw, "\r\n", "\n")
-	lines := strings.Split(raw, "\n")
-	filtered := make([]string, 0, len(lines)+1)
-	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
-		if strings.Contains(line, ccvmPCSSetupCronMarker) {
-			continue
-		}
-		filtered = append(filtered, line)
-	}
-	for len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
-		filtered = filtered[:len(filtered)-1]
-	}
-	filtered = append(filtered, ccvmPCSSetupCronLine())
-	return strings.Join(filtered, "\n") + "\n"
-}
-
-func ccvmPCSSetupCronLine() string {
-	return "0 1 * * * /usr/bin/python3 " + filepath.Join(resolveAbleStackConfigPath(), "python", "ccvm_snap", "create_ccvm_snap.py")
-}
-
-func waitForCCVMPCSDomain(timeout time.Duration) error {
+func waitForCCVMPCSResourceStarted(resourceName string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	lastMessage := ""
 	for {
-		out, timedOut, err := runCommandOutputWithEnv("virsh", ccvmSnapShortCommandTimeout, virshEnv(), "domid", ccvmSnapName)
-		if !timedOut && err == nil {
-			return nil
-		}
-		if timedOut {
-			lastMessage = fmt.Sprintf("virsh domid %s timed out", ccvmSnapName)
+		_, resource, err := loadCCVMPCSStatusAndResource(resourceName)
+		if err == nil {
+			startedNode := strings.TrimSpace(resource.Node.Name)
+			if isCCVMPCSResourceStarted(resource) {
+				return startedNode, nil
+			}
+			lastMessage = fmt.Sprintf(
+				"role=%s nodes_running_on=%s node=%s active=%s failed=%s blocked=%s",
+				resource.Role,
+				resource.NodesRunningOn,
+				startedNode,
+				resource.Active,
+				resource.Failed,
+				resource.Blocked,
+			)
 		} else {
-			lastMessage = firstNonEmpty(out, err.Error())
+			lastMessage = err.Error()
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("wait ccvm domain timed out: %s", lastMessage)
+			return "", fmt.Errorf("wait pcs resource %s started timed out: %s", resourceName, lastMessage)
 		}
 		time.Sleep(ccvmPCSSetupPollInterval)
 	}
+}
+
+func isCCVMPCSResourceStarted(resource ccvmSnapPCSResource) bool {
+	return strings.EqualFold(strings.TrimSpace(resource.Role), "Started") &&
+		strings.TrimSpace(resource.NodesRunningOn) == "1" &&
+		strings.TrimSpace(resource.Node.Name) != ""
 }
 
 func configCCVMPCSCluster(req CCVMPCSControlRequest, target string) CCVMPCSControlResponse {
@@ -553,6 +575,9 @@ func createCCVMPCSResource(req CCVMPCSControlRequest, target string) CCVMPCSCont
 		"op", "stop", "timeout=120s",
 		"op", "monitor", "timeout=30", "interval=10",
 	}
+	if req.Disabled {
+		args = append(args, "--disabled")
+	}
 	if _, err := runPCSCommand(pcsCommandTimeout, "pcs", args...); err != nil {
 		return ccvmPCSError(req, target, http.StatusInternalServerError, err.Error(), err.Error())
 	}
@@ -571,7 +596,11 @@ func enableCCVMPCSResource(req CCVMPCSControlRequest, target string) CCVMPCSCont
 	if _, err := runPCSCommand(pcsCommandTimeout, "pcs", "resource", "enable", req.Resource); err != nil {
 		return ccvmPCSError(req, target, http.StatusInternalServerError, err.Error(), err.Error())
 	}
-	return ccvmPCSOK(req, target, "enable")
+	startedNode, err := waitForCCVMPCSResourceStarted(req.Resource, ccvmPCSSetupWaitTimeout)
+	if err != nil {
+		return ccvmPCSError(req, target, http.StatusInternalServerError, err.Error(), err.Error())
+	}
+	return ccvmPCSOK(req, target, map[string]any{"status": "enable", "started": startedNode})
 }
 
 func disableCCVMPCSResource(req CCVMPCSControlRequest, target string) CCVMPCSControlResponse {

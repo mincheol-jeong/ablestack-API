@@ -72,6 +72,25 @@ type DeployStatusWarning struct {
 	Message string `json:"message,omitempty" example:"storage cluster is not HEALTH_OK"`
 }
 
+// DeployPollingTarget describes whether a dashboard status API should be polled.
+// @name DeployPollingTarget
+type DeployPollingTarget struct {
+	Enabled bool   `json:"enabled" example:"true"`
+	Reason  string `json:"reason" example:"cloud center VM is running"`
+}
+
+// DeployPollingPolicy controls status-card polling from the deployment snapshot.
+// @name DeployPollingPolicy
+type DeployPollingPolicy struct {
+	StorageVM      DeployPollingTarget `json:"storage_vm"`
+	StorageCluster DeployPollingTarget `json:"storage_cluster"`
+	GFSResource    DeployPollingTarget `json:"gfs_resource"`
+	GFSDisk        DeployPollingTarget `json:"gfs_disk"`
+	CloudVM        DeployPollingTarget `json:"cloud_vm"`
+	CloudCluster   DeployPollingTarget `json:"cloud_cluster"`
+	Mold           DeployPollingTarget `json:"mold"`
+}
+
 // DeployStatusData is the summarized deployment state for the UI.
 // @name DeployStatusData
 type DeployStatusData struct {
@@ -83,6 +102,7 @@ type DeployStatusData struct {
 	AvailableActions []string              `json:"available_actions,omitempty" example:"deploy_cloud_vm,open_storage_center"`
 	Warnings         []DeployStatusWarning `json:"warnings,omitempty"`
 	Raw              DeployStatusRaw       `json:"raw"`
+	Polling          DeployPollingPolicy   `json:"polling"`
 	CheckedAt        time.Time             `json:"checked_at"`
 }
 

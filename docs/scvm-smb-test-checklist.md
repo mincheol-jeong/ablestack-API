@@ -17,8 +17,8 @@
 
 | 구분 | 항목 | 기준 |
 | --- | --- | --- |
-| API RPM hard dependency | `systemd`, `bash`, `python3` | API service, shell 실행, JSON/helper 처리에 공통 필요 |
-| API RPM recommended | `firewalld` | 있으면 RPM `%post`에서 8090/tcp open 처리 |
+| API RPM hard dependency | `systemd`, `bash`, `python3` | API service와 보안 증적·Samba·shell helper 실행에 필요. Linux 인증은 Go에서 처리 |
+| API RPM recommended | `firewalld` | 있으면 RPM `%post`에서 18090/tcp open 처리 |
 | SCVM SMB runtime | `ceph`, `mount`, `findmnt` 또는 `mountpoint`, `smbpasswd`, `pdbedit`, `useradd`, `userdel`, `systemctl` | SMB normal mode 실행 시 SCVM에 필요 |
 | SCVM SMB ADS runtime | `realm`, `winbind.service`, `update-crypto-policies`, NetworkManager | ADS mode 실행 시 SCVM에 필요 |
 | SCVM helper | `/etc/ablestack/shell/Samba-Execute.sh`, `/etc/ablestack/shell/smb_conf` | API RPM의 `shell/*` 설치 경로 |
@@ -35,9 +35,9 @@ grep '^ABLESTACK_GLUE_SMB_SCRIPT=' /etc/ablestack/ablestack-api.env
 ## 기본 상태 확인
 
 ```bash
-curl -sS http://<scvm-ip>:8090/api/v1/health
+curl -sS http://<scvm-ip>:18090/api/v1/health
 
-curl -sS http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -sS http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -51,7 +51,7 @@ curl -sS http://<scvm-ip>:8090/api/v1/glue/smb \
 ## Normal SMB 생성
 
 ```bash
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -78,7 +78,7 @@ curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb \
 ## 상태 재조회
 
 ```bash
-curl -sS http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -sS http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -92,7 +92,7 @@ curl -sS http://<scvm-ip>:8090/api/v1/glue/smb \
 ## Share folder 추가
 
 ```bash
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb/folder \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/smb/folder \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -113,7 +113,7 @@ curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb/folder \
 ## Share folder 삭제
 
 ```bash
-curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb/folder \
+curl -X DELETE http://<scvm-ip>:18090/api/v1/glue/smb/folder \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -134,7 +134,7 @@ curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb/folder \
 생성:
 
 ```bash
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb/user \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/smb/user \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"username":"smbuser02","password":"Password1!"}'
@@ -143,7 +143,7 @@ curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb/user \
 수정:
 
 ```bash
-curl -X PUT http://<scvm-ip>:8090/api/v1/glue/smb/user \
+curl -X PUT http://<scvm-ip>:18090/api/v1/glue/smb/user \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"username":"smbuser02","password":"Password2!"}'
@@ -152,7 +152,7 @@ curl -X PUT http://<scvm-ip>:8090/api/v1/glue/smb/user \
 삭제:
 
 ```bash
-curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb/user \
+curl -X DELETE http://<scvm-ip>:18090/api/v1/glue/smb/user \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"username":"smbuser02"}'
@@ -167,7 +167,7 @@ curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb/user \
 ## 전체 삭제
 
 ```bash
-curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -X DELETE http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -185,7 +185,7 @@ curl -X DELETE http://<scvm-ip>:8090/api/v1/glue/smb \
 ADS는 AD DNS/realm 환경에 영향을 주므로 normal mode 검증이 끝난 뒤 별도 환경에서 확인한다.
 
 ```bash
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -215,7 +215,7 @@ curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb \
 의도적으로 누락 값을 보내 API가 실패를 명확히 반환하는지 확인한다.
 
 ```bash
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/smb \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/smb \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"sec_type":"normal","username":"smbuser01"}'

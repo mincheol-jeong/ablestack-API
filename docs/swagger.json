@@ -289,7 +289,7 @@
         },
         "/cube/ccvm/bootstrap": {
             "post": {
-                "description": "CCVM의 /root/bootstrap.sh를 host qemu-guest-agent로 실행한 뒤 CCVM API health 확인, 라이선스 등록/status 확인을 수행합니다. deploy_run의 ccvm_bootstrap step도 같은 실행 흐름을 사용합니다.",
+                "description": "내부 API로 Ablecube TPM/PCS 서비스와 HCI SCVM Crushmap을 로컬 준비하고, 라이선스가 등록된 CCVM API에서 /root/bootstrap.sh를 실행한 뒤 CCVM API health와 라이선스 status를 확인합니다. deploy_run의 ccvm_bootstrap step도 같은 실행 흐름을 사용합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -315,6 +315,52 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.BootstrapResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP400BadRequest"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/ccvm/create": {
+            "post": {
+                "description": "제품 타입에 맞는 CCVM XML과 backing image를 준비하고 PCS 리소스를 비활성 상태로 생성합니다. 시작은 /cube/ccvm/lifecycle action=start를 사용합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-CCVM"
+                ],
+                "summary": "Create CCVM",
+                "parameters": [
+                    {
+                        "description": "ccvm create request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateResponse"
                         }
                     },
                     "400": {
@@ -380,7 +426,7 @@
         },
         "/cube/ccvm/lifecycle": {
             "post": {
-                "description": "Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: setup, reset, copy, start, stop, restart, delete. standalone setup은 로컬 CCVM을 생성하고, reset은 clusterConfig.type에 따라 PCS/GFS/local disk 설정까지 초기화합니다.",
+                "description": "Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: initialize, setup, reset, copy, start, stop, restart, delete. initialize는 기존 cloudcenter_res와 /mnt/glue-gfs/ccvm*만 정리하며, reset은 clusterConfig.type에 따라 PCS/GFS/local disk 설정까지 초기화합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -407,6 +453,51 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMLifecycleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP400BadRequest"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/ccvm/monitoring/config": {
+            "post": {
+                "description": "configure는 CCVM의 기존 Wall Python 도구로 대상 확인, Netdive, Wall/Prometheus/Grafana/Loki, 서비스와 SMTP 구성을 수행하고 API가 실제 서비스 상태와 system profile 반영을 검증합니다. update는 config_wall.py update를 실행하고 서비스 상태를 검증합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-CCVM"
+                ],
+                "summary": "Configure or update CCVM monitoring",
+                "parameters": [
+                    {
+                        "description": "monitoring config request",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigResponse"
                         }
                     },
                     "400": {
@@ -1146,7 +1237,7 @@
         },
         "/cube/deploy/run": {
             "post": {
-                "description": "기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/스토리지/CCVM 준비 단계를 job으로 순차 실행합니다.",
+                "description": "기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/RBD/GFS/CCVM/Wall 모니터링 준비 단계를 job으로 순차 실행합니다. queued/running job은 동시에 하나만 허용합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1179,6 +1270,12 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/HTTP400BadRequest"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP409Conflict"
                         }
                     }
                 }
@@ -1215,7 +1312,7 @@
         },
         "/cube/disk": {
             "get": {
-                "description": "Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath/single 분류 목록을 반환합니다.",
+                "description": "Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath -ll 기준 map 또는 OS 영역을 제외한 lsblk 물리 디스크 목록을 반환합니다.",
                 "consumes": [
                     "application/x-www-form-urlencoded"
                 ],
@@ -1356,7 +1453,7 @@
         },
         "/cube/gfs/resource/status": {
             "get": {
-                "description": "pcs status xml 기반 GFS 리소스 상태를 조회합니다.",
+                "description": "pcs status xml 기반 펜싱, 잠금 및 glue-gfs/glue-gfs_res GFS2 마운트 리소스 상태를 조회합니다.",
                 "consumes": [
                     "application/x-www-form-urlencoded"
                 ],
@@ -1564,6 +1661,93 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/hosts/remove": {
+            "post": {
+                "description": "HCI는 Mold Host, Ceph/SCVM을 제거하고 VM은 Mold Host, PCS/GFS 노드를 제거한 뒤 전체 노드 구성과 Wall을 갱신합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-Cluster"
+                ],
+                "summary": "Start product-aware host removal job",
+                "parameters": [
+                    {
+                        "description": "host removal request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP400BadRequest"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/hosts/remove/jobs": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-Cluster"
+                ],
+                "summary": "List host removal jobs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/hosts/remove/jobs/{job_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-Cluster"
+                ],
+                "summary": "Get host removal job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "job id",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobResponse"
                         }
                     }
                 }
@@ -1811,7 +1995,7 @@
         },
         "/cube/pcs/control": {
             "post": {
-                "description": "CCVM Pacemaker/PCS setup/config/create/enable/disable/move/cleanup/status/remove/destroy/stop/sync/ccvm-status 작업을 수행합니다. setup은 cluster.json의 clusterConfig.pcsCluster 노드에 CCVM 스냅샷 cron을 배포한 뒤 cloudcenter_res를 구성합니다.",
+                "description": "CCVM Pacemaker/PCS setup/config/create/enable/disable/move/cleanup/status/remove/destroy/stop/sync/ccvm-status 작업을 수행합니다. setup은 clusterConfig.pcsCluster 노드의 기존 Python 스냅샷 cron을 정리한 뒤 cloudcenter_res를 구성합니다. 자동 스냅샷은 API 내부 Go 스케줄러가 수행합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1903,7 +2087,7 @@
         },
         "/cube/scvm/bootstrap": {
             "post": {
-                "description": "대표 SCVM의 /root/bootstrap.sh를 host qemu-guest-agent로 실행한 뒤 SCVM API health 확인, 라이선스 등록/status 확인을 수행합니다. deploy_run의 scvm_bootstrap step도 같은 실행 흐름을 사용합니다.",
+                "description": "각 host API가 로컬 SCVM을 qemu-guest-agent로 준비한 뒤 첫 번째 SCVM에서 Ceph bootstrap/host 등록/검증을 수행하고, SCVM API health와 라이선스를 확인합니다. deploy_run의 scvm_bootstrap step도 같은 실행 흐름을 사용합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2067,9 +2251,116 @@
                 }
             }
         },
+        "/cube/security/evidence": {
+            "get": {
+                "description": "가장 최근에 생성된 보안 증적 ZIP 메타데이터를 반환합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-Security"
+                ],
+                "summary": "Latest Security Evidence",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP404NotFound"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "cluster.json 대상의 읽기 전용 보안 점검 결과를 수집해 TXT/XLSX/PPTX가 포함된 ZIP 패키지를 생성합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-Security"
+                ],
+                "summary": "Generate Security Evidence",
+                "parameters": [
+                    {
+                        "description": "security evidence options",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP400BadRequest"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/security/evidence/download": {
+            "get": {
+                "description": "가장 최근에 생성된 보안 증적 ZIP 파일을 다운로드합니다.",
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "Cube-Security"
+                ],
+                "summary": "Download Security Evidence",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP404NotFound"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
         "/cube/security/patch": {
             "post": {
-                "description": "cluster.json 대상에 security_patch.sh를 로컬/SSH로 실행하거나 security_patch.status 값을 업데이트합니다.",
+                "description": "cluster.json 대상 노드 API를 호출해 각 노드가 security_patch.sh를 로컬 실행하거나 security_patch.status 값을 업데이트합니다.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2155,6 +2446,52 @@
                         "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SSHKeyResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP500InternalServerError"
+                        }
+                    }
+                }
+            }
+        },
+        "/cube/ssh/trust": {
+            "post": {
+                "description": "/root/.ssh/authorized_keys에서 cloud@ccvm 식별 공개키만 멱등적으로 등록, 조회 또는 제거합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Cube-SSH"
+                ],
+                "summary": "CloudStack Management SSH Trust",
+                "parameters": [
+                    {
+                        "description": "ssh trust request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SSHTrustRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SSHTrustResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/HTTP400BadRequest"
                         }
                     },
                     "500": {
@@ -6249,6 +6586,313 @@
                 }
             }
         },
+        "/mold": {
+            "get": {
+                "description": "CCVM 전용 Mold API 등록 상태와 현재 노드의 CCVM 판정 결과를 반환합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold API 상태",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/bootstrap": {
+            "post": {
+                "description": "Mold 인프라 자동화를 비동기 job으로 시작합니다. hosts, primary/secondary storage, VLAN은 cluster.json에서 자동 계산하고 각 단계 결과는 /mold/jobs/{job_id}에서 조회합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold bootstrap job 시작",
+                "parameters": [
+                    {
+                        "description": "Mold bootstrap request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/bootstrap/plan": {
+            "post": {
+                "description": "Mold 인프라 자동화 입력값을 검증하고 실행 순서, create command, 검증용 list command, 누락 입력값을 반환합니다. hosts, primary/secondary storage, VLAN은 cluster.json의 type/hosts/ccvm.ip에서 자동 계산하며 실제 인프라는 생성하지 않습니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold bootstrap plan",
+                "parameters": [
+                    {
+                        "description": "Mold bootstrap request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/capabilities": {
+            "get": {
+                "description": "cluster.json의 clusterConfig.ccvm.ip로 Mold 기본 인증값(admin/password, domain=/)으로 login 후 listCapabilities command를 호출합니다. 인증값 override가 필요하면 POST /mold/capabilities를 사용합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold capabilities 조회",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "cluster.json의 clusterConfig.ccvm.ip로 Mold login 후 listCapabilities command를 호출합니다. 요청 body/form이 비어 있으면 admin/password, domain=/, response=json 기본값을 사용합니다.",
+                "consumes": [
+                    "application/json",
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold capabilities 조회",
+                "parameters": [
+                    {
+                        "description": "Mold login override",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/jobs": {
+            "get": {
+                "description": "최근 Mold bootstrap job 목록을 반환합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold bootstrap job 목록",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/jobs/{job_id}": {
+            "get": {
+                "description": "Mold bootstrap job의 현재 step, 완료 step, 실패 에러, 최종 리소스 결과를 반환합니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold bootstrap job 조회",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "job id",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mold/session": {
+            "post": {
+                "description": "cluster.json의 clusterConfig.ccvm.ip로 Mold endpoint를 계산한 뒤 login command를 호출해 sessionkey를 반환합니다. 요청 body/form이 비어 있으면 admin/password, domain=/, response=json 기본값을 사용합니다.",
+                "consumes": [
+                    "application/json",
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mold"
+                ],
+                "summary": "Mold session 생성",
+                "parameters": [
+                    {
+                        "description": "Mold login override",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/version": {
             "get": {
                 "description": "OS, Kernel, Cockpit, Mold, ABLESTACK 패키지, Glue 버전을 보여줍니다. Glue 버전은 ablestack-hci/ablestack-hci-filesystem에서만 포함합니다.",
@@ -6351,6 +6995,19 @@
                 "message": {
                     "type": "string",
                     "example": "Not Found"
+                }
+            }
+        },
+        "HTTP409Conflict": {
+            "type": "object",
+            "properties": {
+                "err_code": {
+                    "type": "integer",
+                    "example": 409
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Conflict"
                 }
             }
         },
@@ -6606,6 +7263,11 @@
         "ablecloud_io_ablestack-api_internal_model_cube.BootstrapRequest": {
             "type": "object",
             "properties": {
+                "join_existing_cluster": {
+                    "description": "기존 Ceph 클러스터에 대상 SCVM만 추가한다. 초기 Ceph bootstrap은 실행하지 않는다.",
+                    "type": "boolean",
+                    "example": true
+                },
                 "license_content": {
                     "description": "라이선스 파일 내용(base64). 비어 있으면 현재 로컬 라이선스를 재사용한다.",
                     "type": "string",
@@ -6624,7 +7286,7 @@
                     }
                 },
                 "run_script": {
-                    "description": "VM API health/license 단계 전에 host qemu-guest-agent로 /root/bootstrap.sh를 실행할지 여부.",
+                    "description": "VM API health/license 단계 전에 /root/bootstrap.sh를 실행할지 여부. SCVM은 host QGA, CCVM은 CCVM API 로컬 실행을 사용한다.",
                     "type": "boolean",
                     "example": true
                 },
@@ -6673,12 +7335,22 @@
                     "items": {
                         "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.BootstrapScriptResult"
                     }
+                },
+                "system_profile": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterApplyResult"
+                    }
                 }
             }
         },
         "ablecloud_io_ablestack-api_internal_model_cube.BootstrapScriptResult": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "prepare"
+                },
                 "code": {
                     "type": "integer",
                     "example": 200
@@ -6810,6 +7482,55 @@
                 }
             }
         },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateRequest": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "description": "vCPU 개수",
+                    "type": "integer",
+                    "example": 4
+                },
+                "gfs_mount_point": {
+                    "description": "GFS mount point. ablestack-vm에서 ccvm.qcow2 경로 계산에 사용한다.",
+                    "type": "string",
+                    "example": "/mnt/glue-gfs"
+                },
+                "management_network_bridge": {
+                    "description": "management network bridge",
+                    "type": "string",
+                    "example": "br0"
+                },
+                "memory": {
+                    "description": "메모리 크기(GiB)",
+                    "type": "integer",
+                    "example": 16
+                },
+                "service_network_bridge": {
+                    "description": "optional service network bridge",
+                    "type": "string",
+                    "example": "br1"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ccvm create success"
+                },
+                "setup": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMPCSControlResponse"
+                },
+                "xml": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMXMLCreateResponse"
+                }
+            }
+        },
         "ablecloud_io_ablestack-api_internal_model_cube.CCVMEditRequest": {
             "type": "object",
             "properties": {
@@ -6876,7 +7597,7 @@
             "type": "object",
             "properties": {
                 "action": {
-                    "description": "action: setup/reset/copy/start/stop/restart/delete",
+                    "description": "action: initialize/setup/reset/copy/start/stop/restart/delete",
                     "type": "string",
                     "example": "reset"
                 },
@@ -6929,6 +7650,156 @@
                 "val": {
                     "type": "string",
                     "example": "cloud center reset success"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "configure",
+                        "update"
+                    ],
+                    "example": "configure"
+                },
+                "ccvm": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "10.10.31.10"
+                    ]
+                },
+                "cube": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "10.10.31.1",
+                        "10.10.31.2"
+                    ]
+                },
+                "scvm": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "10.10.31.11",
+                        "10.10.31.12"
+                    ]
+                },
+                "smtp": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringSMTPConfig"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "configure"
+                },
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "message": {
+                    "type": "string",
+                    "example": "monitoring configuration success"
+                },
+                "services": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringServiceStatus"
+                    }
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigStep"
+                    }
+                },
+                "system_profile": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterApplyResult"
+                    }
+                },
+                "val": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigStep": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "message": {
+                    "type": "string",
+                    "example": "success wall configuration"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "configure_wall"
+                },
+                "output": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "succeeded"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringSMTPConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "host": {
+                    "type": "string",
+                    "example": "10.10.31.20"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "password"
+                },
+                "port": {
+                    "type": "integer",
+                    "example": 25
+                },
+                "user": {
+                    "type": "string",
+                    "example": "admin@example.com"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringServiceStatus": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "name": {
+                    "type": "string",
+                    "example": "prometheus"
                 }
             }
         },
@@ -7568,6 +8439,19 @@
                     "type": "string",
                     "example": "time.google.com"
                 },
+                "gfs": {
+                    "description": "GFS2 filesystem format settings",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterGFSConfig"
+                        }
+                    ]
+                },
+                "hostType": {
+                    "description": "latest cluster host operation: new/add",
+                    "type": "string",
+                    "example": "add"
+                },
                 "hosts": {
                     "description": "host list",
                     "type": "array",
@@ -7600,6 +8484,31 @@
                     "description": "cluster type",
                     "type": "string",
                     "example": "ablestack-vm"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.ClusterGFSConfig": {
+            "type": "object",
+            "properties": {
+                "journal_size_description": {
+                    "description": "Human-readable journal size constraint stored with cluster.json.",
+                    "type": "string",
+                    "example": "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 8MB~1024MB입니다."
+                },
+                "journal_size_mb": {
+                    "description": "GFS2 journal size in MB. Must be a power of two between 8 and 1024.",
+                    "type": "integer",
+                    "example": 512
+                },
+                "resource_group_size_description": {
+                    "description": "Human-readable resource group size constraint stored with cluster.json.",
+                    "type": "string",
+                    "example": "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 32MB~2048MB입니다."
+                },
+                "resource_group_size_mb": {
+                    "description": "GFS2 resource group size in MB. Must be a power of two between 32 and 2048.",
+                    "type": "integer",
+                    "example": 1024
                 }
             }
         },
@@ -7857,6 +8766,45 @@
                 "val": {}
             }
         },
+        "ablecloud_io_ablestack-api_internal_model_cube.DeployPollingPolicy": {
+            "type": "object",
+            "properties": {
+                "cloud_cluster": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "cloud_vm": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "gfs_disk": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "gfs_resource": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "mold": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "storage_cluster": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                },
+                "storage_vm": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "cloud center VM is running"
+                }
+            }
+        },
         "ablecloud_io_ablestack-api_internal_model_cube.DeployRunJob": {
             "type": "object",
             "properties": {
@@ -7984,6 +8932,11 @@
                         }
                     ]
                 },
+                "join_existing_scvm_cluster": {
+                    "description": "신규 SCVM을 기존 Ceph 클러스터에 조인한다. 초기 Ceph bootstrap은 실행하지 않는다.",
+                    "type": "boolean",
+                    "example": true
+                },
                 "license_content": {
                     "description": "license file content (base64). If empty, current local license is reused by license_apply.",
                     "type": "string",
@@ -8014,6 +8967,14 @@
                     "type": "string",
                     "example": "all"
                 },
+                "monitoring": {
+                    "description": "CCVM Wall monitoring configuration. action defaults to configure in deploy/run.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest"
+                        }
+                    ]
+                },
                 "only": {
                     "description": "run only these steps.",
                     "type": "array",
@@ -8024,7 +8985,17 @@
                         "license_apply",
                         "cluster_apply",
                         "scvm_bootstrap",
+                        "rbd_prepare",
+                        "storage_prepare",
                         "ccvm_bootstrap"
+                    ]
+                },
+                "rbd": {
+                    "description": "RBD image creation and host rbdmap request for HCI filesystem flows.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.RBDManageRequest"
+                        }
                     ]
                 },
                 "run_bootstrap_script": {
@@ -8047,6 +9018,16 @@
                     },
                     "example": [
                         "local_prepare"
+                    ]
+                },
+                "target_hostnames": {
+                    "description": "SCVM 준비/bootstrap 대상을 cluster.json hosts[].hostname으로 제한한다.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "ablecube31-4"
                     ]
                 },
                 "update_system_profile": {
@@ -8134,6 +9115,9 @@
                 "os_type": {
                     "type": "string",
                     "example": "ablestack-hci"
+                },
+                "polling": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingPolicy"
                 },
                 "raw": {
                     "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployStatusRaw"
@@ -8258,6 +9242,12 @@
                 "id": {
                     "type": "string"
                 },
+                "in_use": {
+                    "type": "boolean"
+                },
+                "in_use_reason": {
+                    "type": "string"
+                },
                 "kname": {
                     "type": "string"
                 },
@@ -8271,6 +9261,9 @@
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "path_mode": {
                     "type": "string"
                 },
                 "pkname": {
@@ -8304,6 +9297,9 @@
                 "type": {
                     "type": "string"
                 },
+                "uuid": {
+                    "type": "string"
+                },
                 "vendor": {
                     "type": "string"
                 },
@@ -8326,9 +9322,24 @@
             "type": "object",
             "properties": {
                 "action": {
-                    "description": "action: init-pcs-cluster/modify-lvm-conf/partprobe/lvmdevices-add/resource-cleanup/check-host/check-stonith/check-ipmi/set-alert/list-gfs/delete-gfs/rescan/extend/scan/add-extend",
+                    "description": "action: init-pcs-cluster/create-gfs/modify-lvm-conf/set-cluster-password/partprobe/lvmdevices-add/resource-cleanup/check-host/configure-stonith/check-stonith/check-ipmi/set-alert/list-gfs/delete-gfs/rescan/extend/scan/add-extend",
                     "type": "string",
                     "example": "init-pcs-cluster"
+                },
+                "cluster_name": {
+                    "description": "PCS cluster name. init-pcs-cluster defaults to cloudcenter_cluster.",
+                    "type": "string",
+                    "example": "cloudcenter_cluster"
+                },
+                "cluster_password": {
+                    "description": "PCS authentication password. init-pcs-cluster defaults to password.",
+                    "type": "string",
+                    "example": "password"
+                },
+                "cluster_user": {
+                    "description": "PCS authentication user. init-pcs-cluster defaults to hacluster.",
+                    "type": "string",
+                    "example": "hacluster"
                 },
                 "control": {
                     "description": "check-stonith control: check/enable/disable/security-disable/security-enable",
@@ -8428,6 +9439,14 @@
         "ablecloud_io_ablestack-api_internal_model_cube.GFSManageStonithDevice": {
             "type": "object",
             "properties": {
+                "host": {
+                    "type": "string",
+                    "example": "10.10.31.1"
+                },
+                "hostname": {
+                    "type": "string",
+                    "example": "ablecube31-1"
+                },
                 "ipaddr": {
                     "type": "string",
                     "example": "192.168.0.10"
@@ -8460,6 +9479,10 @@
                 "message": {
                     "type": "string",
                     "example": "ok"
+                },
+                "step": {
+                    "type": "string",
+                    "example": "modify_lvm_conf"
                 },
                 "target": {
                     "type": "string",
@@ -8739,6 +9762,145 @@
                 }
             }
         },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob": {
+            "type": "object",
+            "properties": {
+                "cluster_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_step": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobListResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "job": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveRequest": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "example": "/"
+                },
+                "force": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "hostname": {
+                    "type": "string",
+                    "example": "ablecube31-4"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "password"
+                },
+                "username": {
+                    "description": "CloudStack 관리자 계정. 비어 있으면 admin/password, domain=/ 기본값을 사용한다.",
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStartResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "job_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "output": {},
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "ablecloud_io_ablestack-api_internal_model_cube.HostRoleGroup": {
             "type": "object",
             "properties": {
@@ -8820,6 +9982,11 @@
                         "10.10.31.1",
                         "10.10.31.2"
                     ]
+                },
+                "wait_for_ready": {
+                    "description": "wait for the CCVM PCS resource or local libvirt domain before registering its license.",
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -8845,6 +10012,10 @@
         "ablecloud_io_ablestack-api_internal_model_cube.LicenseApplyTargetResult": {
             "type": "object",
             "properties": {
+                "attempts": {
+                    "type": "integer",
+                    "example": 2
+                },
                 "code": {
                     "type": "integer",
                     "example": 200
@@ -9549,6 +10720,194 @@
                 "val": {}
             }
         },
+        "ablecloud_io_ablestack-api_internal_model_cube.SSHTrustRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "action: ensure/status/remove",
+                    "type": "string",
+                    "example": "ensure"
+                },
+                "identifier": {
+                    "description": "authorized_keys comment used as the stable registration identifier.",
+                    "type": "string",
+                    "example": "cloud@ccvm"
+                },
+                "public_key": {
+                    "description": "OpenSSH public key. Required for ensure.",
+                    "type": "string",
+                    "example": "ecdsa-sha2-nistp256 AAAA... cloud@ccvm"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.SSHTrustResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "ensure"
+                },
+                "changed": {
+                    "type": "boolean"
+                },
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "fingerprint": {
+                    "type": "string",
+                    "example": "SHA256:..."
+                },
+                "identifier": {
+                    "type": "string",
+                    "example": "cloud@ccvm"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ssh trust key ensured"
+                },
+                "present": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceMetadata": {
+            "type": "object",
+            "properties": {
+                "clusterType": {
+                    "type": "string",
+                    "example": "ablestack-hci"
+                },
+                "collectedHosts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "collectorStatus": {
+                    "type": "integer"
+                },
+                "collectorWarning": {
+                    "type": "string"
+                },
+                "downloadAvailable": {
+                    "type": "boolean"
+                },
+                "filename": {
+                    "type": "string",
+                    "example": "ABLESTACK 보안 취약점 증적 자료.zip"
+                },
+                "generatedAt": {
+                    "type": "string",
+                    "example": "2026-07-27T10:30:00+09:00"
+                },
+                "hosts": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "items": {
+                    "type": "integer",
+                    "example": 67
+                },
+                "path": {
+                    "type": "string"
+                },
+                "requestedHosts": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "requestedTargets": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "runDirectory": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer",
+                    "example": 1048576
+                },
+                "slides": {
+                    "type": "integer",
+                    "example": 68
+                },
+                "targetGroups": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceRequest": {
+            "type": "object",
+            "properties": {
+                "hosts": {
+                    "description": "cluster.json 대신 명시적으로 수집할 hostname/IP 목록",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "ablecube1",
+                        "scvm1"
+                    ]
+                },
+                "items": {
+                    "description": "점검 항목: all, U-01,U-02 또는 U-01:U-13",
+                    "type": "string",
+                    "example": "all"
+                },
+                "max_output_lines": {
+                    "description": "명령별 최대 출력 행 수",
+                    "type": "integer",
+                    "example": 400
+                },
+                "ssh_port": {
+                    "description": "SSH 포트. 0이면 로컬 sshd 설정에서 자동 감지한다.",
+                    "type": "integer",
+                    "example": 22
+                },
+                "ssh_user": {
+                    "description": "SSH 사용자",
+                    "type": "string",
+                    "example": "root"
+                },
+                "targets": {
+                    "description": "대상 그룹: all/ablecube/scvm/ccvm",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "all"
+                    ]
+                },
+                "timeout": {
+                    "description": "호스트별 명령 제한 시간(초)",
+                    "type": "integer",
+                    "example": 120
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "val": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceMetadata"
+                }
+            }
+        },
         "ablecloud_io_ablestack-api_internal_model_cube.SecurityPatchRequest": {
             "type": "object",
             "properties": {
@@ -9573,7 +10932,7 @@
                     "example": "/etc/ablestack/properties/cluster.json"
                 },
                 "local": {
-                    "description": "update_json_file 사용 시 현재 호스트에서만 JSON을 업데이트한다.",
+                    "description": "내부 fan-out 요청에서 현재 노드만 실행한다. update_json_file에도 동일하게 적용된다.",
                     "type": "boolean",
                     "example": false
                 },
@@ -9639,7 +10998,7 @@
             "type": "object",
             "properties": {
                 "action": {
-                    "description": "action: status/update/allUpdate/reset",
+                    "description": "action: status/update/allUpdate/reset/gfs-configure",
                     "type": "string",
                     "example": "status"
                 },
@@ -10605,6 +11964,558 @@
                         "redeploy"
                     ],
                     "example": "restart"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 431
+                },
+                "command": {
+                    "type": "string",
+                    "example": "createZone"
+                },
+                "endpoint": {
+                    "type": "string",
+                    "example": "http://10.10.254.236:8080/client/api"
+                },
+                "error_code": {
+                    "type": "string",
+                    "example": "431"
+                },
+                "error_text": {
+                    "type": "string",
+                    "example": "unable to create zone"
+                },
+                "http_body": {
+                    "type": "string"
+                },
+                "http_status": {
+                    "type": "integer",
+                    "example": 401
+                },
+                "message": {
+                    "type": "string",
+                    "example": "mold api error response"
+                },
+                "method": {
+                    "type": "string",
+                    "example": "POST"
+                },
+                "raw": {},
+                "sessionkey_attached": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "step": {
+                    "type": "string",
+                    "example": "create_zone"
+                },
+                "verify_command": {
+                    "type": "string",
+                    "example": "listZones"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "current_step": {
+                    "type": "string",
+                    "example": "create_zone"
+                },
+                "error": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "018f9c39-7ca9-7f4e-9a04-f6373d8f7e2b"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "resources": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapResourceResults"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "running"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobListResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob"
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "job": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "example": "createZone"
+                },
+                "duration_ms": {
+                    "type": "integer",
+                    "example": 1200
+                },
+                "error": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "create_zone"
+                },
+                "result": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapStepResult"
+                },
+                "result_key": {
+                    "type": "string",
+                    "example": "zone"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "running"
+                },
+                "verify_command": {
+                    "type": "string",
+                    "example": "listZones"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest": {
+            "type": "object",
+            "properties": {
+                "auth": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest"
+                },
+                "cluster": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ClusterRequest"
+                },
+                "physical_network": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PhysicalNetworkRequest"
+                },
+                "pod": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PodRequest"
+                },
+                "public_ip": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PublicIPRangeRequest"
+                },
+                "secondary_staging_store": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.SecondaryStagingStoreRequest"
+                },
+                "zone": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ZoneRequest"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapResourceResults": {
+            "type": "object",
+            "properties": {
+                "cluster": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "hosts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                    }
+                },
+                "network_providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                    }
+                },
+                "physical_network": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "pod": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "primary_storage": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "public_ip_range": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "secondary_staging_store": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "secondary_storage": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "system_vms": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                    }
+                },
+                "traffic_types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                    }
+                },
+                "zone": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapStartResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 202
+                },
+                "job_id": {
+                    "type": "string",
+                    "example": "018f9c39-7ca9-7f4e-9a04-f6373d8f7e2b"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "mold bootstrap job started"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "queued"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep"
+                    }
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.BootstrapStepResult": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "example": "createZone"
+                },
+                "created": {
+                    "type": "boolean"
+                },
+                "error": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError"
+                },
+                "existing": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "create_zone"
+                },
+                "raw_response": {},
+                "resource": {
+                    "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult"
+                    }
+                },
+                "result_key": {
+                    "type": "string",
+                    "example": "zone"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "succeeded"
+                },
+                "verified": {
+                    "type": "boolean"
+                },
+                "verified_by": {
+                    "type": "string",
+                    "example": "listZones"
+                },
+                "verify_command": {
+                    "type": "string",
+                    "example": "listZones"
+                },
+                "verify_response": {}
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.ClusterRequest": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string",
+                    "example": "x86_64"
+                },
+                "clustertype": {
+                    "type": "string",
+                    "example": "CloudManaged"
+                },
+                "hypervisor": {
+                    "type": "string",
+                    "example": "KVM"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Cluster"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "example": "/"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "password"
+                },
+                "response": {
+                    "type": "string",
+                    "example": "json"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.PhysicalNetworkRequest": {
+            "type": "object",
+            "properties": {
+                "broadcastdomainrange": {
+                    "type": "string",
+                    "example": "Zone"
+                },
+                "isolationmethods": {
+                    "type": "string",
+                    "example": "VLAN"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Physicalnetwork"
+                },
+                "networkspeed": {
+                    "type": "string",
+                    "example": "10G"
+                },
+                "tags": {
+                    "type": "string",
+                    "example": "guest"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.PodRequest": {
+            "type": "object",
+            "properties": {
+                "endip": {
+                    "type": "string",
+                    "example": "10.10.31.150"
+                },
+                "gateway": {
+                    "type": "string",
+                    "example": "10.10.31.1"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Pod"
+                },
+                "netmask": {
+                    "type": "string",
+                    "example": "255.255.255.0"
+                },
+                "startip": {
+                    "type": "string",
+                    "example": "10.10.31.100"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.PublicIPRangeRequest": {
+            "type": "object",
+            "properties": {
+                "endip": {
+                    "type": "string",
+                    "example": "10.10.20.150"
+                },
+                "gateway": {
+                    "type": "string",
+                    "example": "10.10.20.1"
+                },
+                "netmask": {
+                    "type": "string",
+                    "example": "255.255.255.0"
+                },
+                "startip": {
+                    "type": "string",
+                    "example": "10.10.20.100"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.ResourceResult": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "2f6b0c0e-0000-0000-0000-000000000001"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "zone-1"
+                },
+                "raw": {},
+                "state": {
+                    "type": "string",
+                    "example": "Enabled"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "Up"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "nfs://10.10.31.20/export/secondary"
+                },
+                "verified_by": {
+                    "type": "string",
+                    "example": "listZones"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.Response": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "val": {}
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.SecondaryStagingStoreRequest": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "example": "NFS"
+                },
+                "scope": {
+                    "type": "string",
+                    "example": "zone"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "nfs://10.10.31.20/export/staging"
+                }
+            }
+        },
+        "ablecloud_io_ablestack-api_internal_model_mold.ZoneRequest": {
+            "type": "object",
+            "properties": {
+                "dns1": {
+                    "type": "string",
+                    "example": "8.8.8.8"
+                },
+                "dns2": {
+                    "type": "string",
+                    "example": "1.1.1.1"
+                },
+                "domain": {
+                    "type": "string",
+                    "example": "local"
+                },
+                "guestcidraddress": {
+                    "type": "string",
+                    "example": "10.1.1.0/24"
+                },
+                "internaldns1": {
+                    "type": "string",
+                    "example": "10.10.0.1"
+                },
+                "internaldns2": {
+                    "type": "string",
+                    "example": "10.10.0.2"
+                },
+                "localstorageenabled": {
+                    "type": "string",
+                    "example": "false"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Zone"
+                },
+                "networktype": {
+                    "type": "string",
+                    "example": "Advanced"
+                },
+                "securitygroupenabled": {
+                    "type": "string",
+                    "example": "false"
                 }
             }
         },

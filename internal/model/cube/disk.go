@@ -7,26 +7,30 @@ import (
 
 // DiskDevice는 lsblk JSON 구조와 맞추기 위한 모델입니다.
 type DiskDevice struct {
-	Name       string       `json:"name"`
-	Kname      string       `json:"kname,omitempty"`
-	Pkname     *string      `json:"pkname,omitempty"` // 내부 트리 재구성에만 쓰고, 최종 응답에서는 제거합니다.
-	Path       *string      `json:"path,omitempty"`
-	Mountpoint *string      `json:"mountpoint,omitempty"`
-	DmUUID     *string      `json:"dm_uuid,omitempty"`
-	ID         *string      `json:"id,omitempty"`
-	RbdPath    *string      `json:"rbd_path,omitempty"`
-	Rota       *bool        `json:"rota,omitempty"`
-	Model      *string      `json:"model,omitempty"`
-	Size       *string      `json:"size,omitempty"`
-	State      *string      `json:"state,omitempty"`
-	Group      *string      `json:"group,omitempty"`
-	Type       *string      `json:"type,omitempty"`
-	Tran       *string      `json:"tran,omitempty"`
-	Subsystems *string      `json:"subsystems,omitempty"`
-	Vendor     *string      `json:"vendor,omitempty"`
-	Wwn        *string      `json:"wwn,omitempty"`
-	SinglePath []DiskDevice `json:"single_path,omitempty"`
-	Children   []DiskDevice `json:"children,omitempty"`
+	Name        string       `json:"name"`
+	Kname       string       `json:"kname,omitempty"`
+	Pkname      *string      `json:"pkname,omitempty"` // 내부 트리 재구성에만 쓰고, 최종 응답에서는 제거합니다.
+	Path        *string      `json:"path,omitempty"`
+	Mountpoint  *string      `json:"mountpoint,omitempty"`
+	DmUUID      *string      `json:"dm_uuid,omitempty"`
+	ID          *string      `json:"id,omitempty"`
+	RbdPath     *string      `json:"rbd_path,omitempty"`
+	Rota        *bool        `json:"rota,omitempty"`
+	Model       *string      `json:"model,omitempty"`
+	Size        *string      `json:"size,omitempty"`
+	State       *string      `json:"state,omitempty"`
+	Group       *string      `json:"group,omitempty"`
+	Type        *string      `json:"type,omitempty"`
+	Tran        *string      `json:"tran,omitempty"`
+	Subsystems  *string      `json:"subsystems,omitempty"`
+	Vendor      *string      `json:"vendor,omitempty"`
+	Wwn         *string      `json:"wwn,omitempty"`
+	UUID        string       `json:"uuid,omitempty"`
+	PathMode    string       `json:"path_mode,omitempty"`
+	InUse       bool         `json:"in_use,omitempty"`
+	InUseReason string       `json:"in_use_reason,omitempty"`
+	SinglePath  []DiskDevice `json:"single_path,omitempty"`
+	Children    []DiskDevice `json:"children,omitempty"`
 }
 
 // TypeBlockDevice는 내부 캐시/처리용 구조입니다.

@@ -22,7 +22,6 @@ type CCVMLifecycleResponse = CubeModel.CCVMLifecycleResponse
 const (
 	ccvmLifecycleRetName           = "CCVM Lifecycle"
 	resetCloudCenterCommandTimeout = 5 * time.Minute
-	resetCloudCenterScriptTimeout  = 30 * time.Minute
 	resetCloudCenterShortTimeout   = 30 * time.Second
 	resetCloudCenterCloudInitISO   = "/var/lib/libvirt/images/ccvm-cloudinit.iso"
 	resetCloudCenterSuccessHCI     = "cloud center reset success"
@@ -36,6 +35,7 @@ const (
 	localCCVMImagePath             = "/mnt/glue/ccvm.qcow2"
 	localCCVMXMLPath               = "/mnt/glue/ccvm.xml"
 	localCCVMResizeSize            = "+350G"
+	ccvmInitializeGFSDirectory     = "/mnt/glue-gfs"
 )
 
 var (
@@ -47,7 +47,7 @@ var (
 // CCVMLifecycle godoc
 //
 //	@Summary		CCVM Lifecycle
-//	@Description	Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: setup, reset, copy, start, stop, restart, delete. standalone setup은 로컬 CCVM을 생성하고, reset은 clusterConfig.type에 따라 PCS/GFS/local disk 설정까지 초기화합니다.
+//	@Description	Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: initialize, setup, reset, copy, start, stop, restart, delete. initialize는 기존 cloudcenter_res와 /mnt/glue-gfs/ccvm*만 정리하며, reset은 clusterConfig.type에 따라 PCS/GFS/local disk 설정까지 초기화합니다.
 //	@Tags			Cube-CCVM
 //	@Accept			json
 //	@Produce		json
@@ -105,6 +105,8 @@ func normalizeCCVMLifecycleRequest(req *CCVMLifecycleRequest) error {
 		return fmt.Errorf("request required")
 	}
 	switch strings.ToLower(strings.TrimSpace(req.Action)) {
+	case "initialize":
+		req.Action = "initialize"
 	case "setup":
 		req.Action = "setup"
 	case "reset":
@@ -134,6 +136,8 @@ func runCCVMLifecycle(req CCVMLifecycleRequest, cfg *CubeModel.ClusterConfigSect
 	osType := strings.ToLower(strings.TrimSpace(cfg.Type))
 	var resp CCVMLifecycleResponse
 	switch req.Action {
+	case "initialize":
+		resp = runCCVMInitializeLifecycle(req, cfg)
 	case "setup":
 		resp = runCCVMSetupLifecycle(req, cfg)
 	case "reset":
@@ -155,7 +159,84 @@ func runCCVMLifecycle(req CCVMLifecycleRequest, cfg *CubeModel.ClusterConfigSect
 	if resp.OSType == "" {
 		resp.OSType = osType
 	}
+	if resp.Code == http.StatusOK && shouldRefreshCCVMKnownHosts(req.Action) {
+		scheduleSSHKnownHostsScanForHosts(ccvmKnownHostsTargets(cfg))
+	}
 	return resp
+}
+
+func runCCVMInitializeLifecycle(req CCVMLifecycleRequest, cfg *CubeModel.ClusterConfigSection) CCVMLifecycleResponse {
+	osType := strings.ToLower(strings.TrimSpace(cfg.Type))
+	statusResp := runCCVMLifecyclePCSAction(cfg, CCVMPCSControlRequest{
+		Action:   "status",
+		Resource: pcsDefaultResourceID,
+	})
+
+	results := make([]CubeModel.ClusterApplyResult, 0, 1)
+	resourceRemoved := false
+	switch statusResp.Code {
+	case http.StatusOK:
+		removeResp := runCCVMLifecyclePCSAction(cfg, CCVMPCSControlRequest{
+			Action:   "remove",
+			Resource: pcsDefaultResourceID,
+		})
+		if removeResp.Code != http.StatusOK {
+			return resetCloudCenterError(osType, "cloud center initialize fail", firstNonEmpty(removeResp.Message, fmt.Sprint(removeResp.Val)), nil)
+		}
+		results = append(results, CubeModel.ClusterApplyResult{
+			Target:  firstNonEmpty(removeResp.Target, "local"),
+			Code:    http.StatusOK,
+			Message: pcsDefaultResourceID + " removed",
+		})
+		resourceRemoved = true
+	case http.StatusBadRequest:
+		// PCS 또는 cloudcenter_res가 아직 구성되지 않은 재시도는 정상 초기화로 처리한다.
+		results = append(results, CubeModel.ClusterApplyResult{
+			Target:  firstNonEmpty(statusResp.Target, "local"),
+			Code:    http.StatusOK,
+			Message: pcsDefaultResourceID + " not found; skipped",
+		})
+	default:
+		return resetCloudCenterError(osType, "cloud center initialize fail", firstNonEmpty(statusResp.Message, fmt.Sprint(statusResp.Val)), nil)
+	}
+
+	removed, err := removeCCVMInitializeFiles(ccvmInitializeGFSDirectory)
+	if err != nil {
+		return resetCloudCenterError(osType, "cloud center initialize fail", err.Error(), results)
+	}
+	return resetCloudCenterOK(osType, fmt.Sprintf("cloud center initialize success: resource_removed=%t removed_files=%d", resourceRemoved, removed), results)
+}
+
+func removeCCVMInitializeFiles(directory string) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(directory, "ccvm*"))
+	if err != nil {
+		return 0, fmt.Errorf("find ccvm files: %w", err)
+	}
+	removed := 0
+	for _, path := range matches {
+		if err := os.RemoveAll(path); err != nil {
+			return removed, fmt.Errorf("remove %s: %w", path, err)
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+func shouldRefreshCCVMKnownHosts(action string) bool {
+	switch action {
+	case "setup", "reset", "start", "restart":
+		return true
+	default:
+		return false
+	}
+}
+
+func ccvmKnownHostsTargets(cfg *CubeModel.ClusterConfigSection) []string {
+	hosts := []string{"ccvm", "ccvm-mngt"}
+	if cfg != nil {
+		hosts = append(hosts, strings.TrimSpace(cfg.CCVM.IP))
+	}
+	return dedupeHosts(hosts)
 }
 
 func runResetCloudCenter(req CCVMLifecycleRequest, cfg *CubeModel.ClusterConfigSection) CCVMLifecycleResponse {
@@ -732,41 +813,6 @@ func resetCloudCenterLVNames(vgNames []string) []string {
 		out = append(out, vgName)
 	}
 	return out
-}
-
-func resetCloudCenterRunPythonScript(script string, args ...string) error {
-	commandArgs := append([]string{script}, args...)
-	out, timedOut, err := runCommandOutputWithEnv("python3", resetCloudCenterScriptTimeout, resetCloudCenterCommandEnv(), commandArgs...)
-	if timedOut {
-		return fmt.Errorf("python3 %s timed out after %s", script, resetCloudCenterScriptTimeout)
-	}
-
-	if code, message, ok := resetCloudCenterParseScriptReturn(out); ok {
-		if code == http.StatusOK || code == http.StatusBadRequest {
-			return nil
-		}
-		return fmt.Errorf("%s returned code %d: %s", filepath.Base(script), code, message)
-	}
-	if err != nil {
-		return fmt.Errorf("python3 %s failed: %s", script, firstNonEmpty(out, err.Error()))
-	}
-	return nil
-}
-
-func resetCloudCenterParseScriptReturn(raw string) (int, string, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, "", false
-	}
-	payload := struct {
-		Code    int    `json:"code"`
-		Val     any    `json:"val"`
-		Message string `json:"message"`
-	}{}
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil || payload.Code == 0 {
-		return 0, "", false
-	}
-	return payload.Code, firstNonEmpty(payload.Message, fmt.Sprint(payload.Val)), true
 }
 
 type resetCloudCenterSystemFlag struct {

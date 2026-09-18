@@ -22,6 +22,12 @@ type DiskResponse = CubeModel.DiskResponse
 type FlatViewResponse = CubeModel.FlatViewResponse
 type FlatDiskItem = CubeModel.FlatDiskItem
 
+type multipathLLMap struct {
+	Name string
+	UUID string
+	Size string
+}
+
 /*
 	핵심 목표입니다.
 
@@ -45,7 +51,7 @@ type FlatDiskItem = CubeModel.FlatDiskItem
 // GetDisk godoc
 //
 //	@Summary		Show List of Disk
-//	@Description	Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath/single 분류 목록을 반환합니다.
+//	@Description	Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath -ll 기준 map 또는 OS 영역을 제외한 lsblk 물리 디스크 목록을 반환합니다.
 //	@Tags			Cube-Disk
 //	@Accept			x-www-form-urlencoded
 //	@Produce		json
@@ -112,9 +118,107 @@ func updateWithAction(d *TypeBlockDevice, action string) error {
 		rebuildTreeByPkname(d)
 	}
 
-	// 3) action 정책 적용(필터 + id/path/rbd_path 보강 + raidcontroller 수집)
-	applyDiskAction(d, action)
+	// 3) 상세 조회의 멀티패스 목록은 multipath -ll 결과를 기준으로 확정합니다.
+	var detailMaps []multipathLLMap
+	detailModeKnown := false
+	detailMultipathMode := false
+	if action == "detail" {
+		detailMaps, detailModeKnown = readMultipathLLMaps()
+		if detailModeKnown {
+			detailMultipathMode = len(detailMaps) > 0
+			detailMaps = filterOSMultipathLLMaps(detailMaps, d.Blockdevices)
+		}
+	}
+
+	// 4) action 정책 적용(필터 + id/path/rbd_path 보강 + raidcontroller 수집)
+	applyDiskAction(d, action, detailMaps, detailModeKnown, detailMultipathMode)
 	return nil
+}
+
+func readMultipathLLMaps() ([]multipathLLMap, bool) {
+	out, timedOut, err := runCommandOutputWithEnv(
+		"multipath",
+		5*time.Second,
+		append([]string{"LANG=C", "LANGUAGE=C"}, os.Environ()...),
+		"-ll",
+	)
+	if timedOut || err != nil {
+		return nil, false
+	}
+	return parseMultipathLL(out), true
+}
+
+func parseMultipathLL(output string) []multipathLLMap {
+	maps := make([]multipathLLMap, 0)
+	currentIndex := -1
+
+	for _, rawLine := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		dmIndex := -1
+		for index, field := range fields {
+			if strings.HasPrefix(field, "dm-") {
+				dmIndex = index
+				break
+			}
+		}
+		if dmIndex > 0 {
+			name := fields[0]
+			uuid := name
+			if dmIndex > 1 && strings.HasPrefix(fields[1], "(") && strings.HasSuffix(fields[1], ")") {
+				uuid = strings.Trim(fields[1], "()")
+			}
+			maps = append(maps, multipathLLMap{
+				Name: strings.TrimSpace(name),
+				UUID: strings.TrimSpace(uuid),
+			})
+			currentIndex = len(maps) - 1
+		}
+
+		if currentIndex >= 0 {
+			for _, field := range fields {
+				if strings.HasPrefix(field, "size=") {
+					maps[currentIndex].Size = strings.TrimPrefix(field, "size=")
+					break
+				}
+			}
+		}
+	}
+
+	return maps
+}
+
+func filterOSMultipathLLMaps(maps []multipathLLMap, devices []DiskDevice) []multipathLLMap {
+	osIdentities := map[string]struct{}{}
+	var walk func(DiskDevice)
+	walk = func(device DiskDevice) {
+		if isMultipathDevice(device) && hasOSMountpoint(device) {
+			for _, identity := range multipathDeviceIdentities(device) {
+				osIdentities[identity] = struct{}{}
+			}
+		}
+		for _, child := range device.Children {
+			walk(child)
+		}
+	}
+	for _, device := range devices {
+		walk(device)
+	}
+
+	filtered := make([]multipathLLMap, 0, len(maps))
+	for _, item := range maps {
+		if _, found := osIdentities[normalizeDiskIdentity(item.Name)]; found {
+			continue
+		}
+		if _, found := osIdentities[normalizeDiskIdentity(item.UUID)]; found {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 // refreshFromLsblk는 lsblk JSON 출력을 읽어 현재 디스크 모델에 반영한다.
@@ -559,6 +663,154 @@ func filterOutOSDisks(devs []DiskDevice) []DiskDevice {
 	return out
 }
 
+func markPartitionedMultipathDevicesInUse(devs []DiskDevice) {
+	for i := range devs {
+		if isMultipathDevice(devs[i]) && hasPartitionDescendant(devs[i]) {
+			devs[i].InUse = true
+			devs[i].InUseReason = "partition exists"
+		}
+	}
+}
+
+func annotateDiskIdentities(devs []DiskDevice) {
+	for i := range devs {
+		if isMultipathDevice(devs[i]) {
+			devs[i].PathMode = "multipath"
+		} else {
+			devs[i].PathMode = "single"
+		}
+		devs[i].UUID = stableDiskUUID(devs[i])
+	}
+}
+
+func stableDiskUUID(dev DiskDevice) string {
+	if isMultipathDevice(dev) {
+		if uuid := multipathUUID(strOrEmpty(dev.DmUUID)); uuid != "" {
+			return uuid
+		}
+	}
+	if dev.ID != nil {
+		if uuid := diskUUIDFromID(*dev.ID); uuid != "" {
+			return uuid
+		}
+	}
+	return strings.TrimSpace(strOrEmpty(dev.Wwn))
+}
+
+func normalizeDiskIdentity(value string) string {
+	return strings.ToLower(strings.TrimSpace(filepath.Base(value)))
+}
+
+func multipathDeviceIdentities(dev DiskDevice) []string {
+	values := []string{
+		dev.Name,
+		dev.Kname,
+		strOrEmpty(dev.Path),
+		stableDiskUUID(dev),
+		multipathUUID(strOrEmpty(dev.DmUUID)),
+	}
+	identities := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		identity := normalizeDiskIdentity(value)
+		if identity == "" {
+			continue
+		}
+		if _, found := seen[identity]; found {
+			continue
+		}
+		seen[identity] = struct{}{}
+		identities = append(identities, identity)
+	}
+	return identities
+}
+
+func reconcileMultipathLLDevices(devices []DiskDevice, maps []multipathLLMap) []DiskDevice {
+	byIdentity := map[string]DiskDevice{}
+	for _, device := range devices {
+		if !isMultipathDevice(device) {
+			continue
+		}
+		for _, identity := range multipathDeviceIdentities(device) {
+			byIdentity[identity] = device
+		}
+	}
+
+	result := make([]DiskDevice, 0, len(maps))
+	for _, item := range maps {
+		device, found := byIdentity[normalizeDiskIdentity(item.Name)]
+		if !found {
+			device, found = byIdentity[normalizeDiskIdentity(item.UUID)]
+		}
+		if !found {
+			device = DiskDevice{Name: item.Name, Kname: item.Name}
+		}
+
+		device.Name = item.Name
+		device.UUID = item.UUID
+		device.PathMode = "multipath"
+		devicePath := "/dev/mapper/" + item.Name
+		device.Path = &devicePath
+		stablePath := "/dev/disk/by-id/dm-uuid-mpath-" + item.UUID
+		device.ID = &stablePath
+		deviceType := "mpath"
+		device.Type = &deviceType
+		if strings.TrimSpace(item.Size) != "" {
+			size := item.Size
+			device.Size = &size
+		}
+		device.Children = nil
+		device.SinglePath = nil
+		device.Pkname = nil
+		result = append(result, device)
+	}
+	return result
+}
+
+func physicalDiskRoots(devices []DiskDevice) []DiskDevice {
+	result := make([]DiskDevice, 0, len(devices))
+	for _, device := range devices {
+		if !strings.EqualFold(strOrEmpty(device.Type), "disk") {
+			continue
+		}
+		result = append(result, device)
+	}
+	return result
+}
+
+func multipathUUID(value string) string {
+	value = strings.TrimSpace(filepath.Base(value))
+	for _, prefix := range []string{"dm-uuid-part1-mpath-", "dm-uuid-mpath-", "part1-mpath-", "mpath-"} {
+		if strings.HasPrefix(strings.ToLower(value), prefix) {
+			return value[len(prefix):]
+		}
+	}
+	return ""
+}
+
+func diskUUIDFromID(value string) string {
+	base := strings.TrimSpace(filepath.Base(value))
+	if uuid := multipathUUID(base); uuid != "" {
+		return uuid
+	}
+	base = strings.TrimSuffix(base, "-part1")
+	for _, prefix := range []string{"wwn-", "scsi-"} {
+		if strings.HasPrefix(strings.ToLower(base), prefix) {
+			return base[len(prefix):]
+		}
+	}
+	return ""
+}
+
+func hasPartitionDescendant(dev DiskDevice) bool {
+	for _, child := range dev.Children {
+		if strings.EqualFold(strOrEmpty(child.Type), "part") || hasPartitionDescendant(child) {
+			return true
+		}
+	}
+	return false
+}
+
 // clearPknameRecursive는 재구성 후 pkname 필드를 재귀적으로 제거한다.
 func clearPknameRecursive(dev *DiskDevice) {
 	if dev == nil {
@@ -707,7 +959,8 @@ func normalizeDiskAction(action string) string {
 }
 
 // list: /dev/disk/by-path
-// gfs/detail: /dev/disk/by-id (dm-uuid 기반)
+// gfs: /dev/disk/by-id (multipath DM UUID 또는 single-path stable ID)
+// detail: /dev/disk/by-id (multipath DM UUID 또는 single-path stable ID)
 // rbd: /dev/rbd/rbd
 // diskPathMap은 action에 맞는 디스크 경로 심볼릭 링크 맵을 읽어 반환한다.
 func diskPathMap(action string) map[string]string {
@@ -718,10 +971,61 @@ func diskPathMap(action string) map[string]string {
 		return readSymlinkMap("/dev/rbd/rbd", func(name string) bool {
 			return strings.Contains(name, "rbd")
 		})
+	case "gfs", "detail":
+		return readStableDiskIDMap()
 	default:
 		return readSymlinkMap("/dev/disk/by-id", func(name string) bool {
 			return strings.Contains(name, "dm-uuid") && !strings.Contains(name, "LVM")
 		})
+	}
+}
+
+func readStableDiskIDMap() map[string]string {
+	result := map[string]string{}
+	priorities := map[string]int{}
+	entries, err := os.ReadDir("/dev/disk/by-id")
+	if err != nil {
+		return result
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		priority := stableDiskIDPriority(name)
+		if priority == 0 || entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		full := filepath.Join("/dev/disk/by-id", name)
+		resolved, err := filepath.EvalSymlinks(full)
+		if err != nil {
+			continue
+		}
+		kname := filepath.Base(resolved)
+		if kname == "" || priority <= priorities[kname] {
+			continue
+		}
+		result[kname] = full
+		priorities[kname] = priority
+	}
+	return result
+}
+
+func stableDiskIDPriority(name string) int {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || strings.Contains(name, "-part") || strings.Contains(name, "lvm") {
+		return 0
+	}
+	switch {
+	case strings.HasPrefix(name, "dm-uuid-mpath-"):
+		return 100
+	case strings.HasPrefix(name, "wwn-"):
+		return 80
+	case strings.HasPrefix(name, "scsi-"):
+		return 70
+	case strings.HasPrefix(name, "nvme-"):
+		return 60
+	case strings.HasPrefix(name, "ata-"):
+		return 50
+	default:
+		return 0
 	}
 }
 
@@ -803,7 +1107,13 @@ func attachIDRecursive(dev *DiskDevice, pathMap map[string]string) {
 }
 
 // applyDiskAction은 action별 필터링, 경로 보강, RAID 컨트롤러 수집을 적용한다.
-func applyDiskAction(d *TypeBlockDevice, action string) {
+func applyDiskAction(
+	d *TypeBlockDevice,
+	action string,
+	detailMaps []multipathLLMap,
+	detailModeKnown bool,
+	detailMultipathMode bool,
+) {
 	if d == nil {
 		return
 	}
@@ -862,12 +1172,24 @@ func applyDiskAction(d *TypeBlockDevice, action string) {
 	}
 
 	if action == "detail" || action == "gfs" {
-		d.Blockdevices = buildMultipathDevices(filtered)
+		if action == "detail" && detailModeKnown && !detailMultipathMode {
+			d.Blockdevices = physicalDiskRoots(filtered)
+		} else {
+			d.Blockdevices = buildMultipathDevices(filtered)
+		}
+		annotateDiskIdentities(d.Blockdevices)
+		if action == "gfs" {
+			markPartitionedMultipathDevicesInUse(d.Blockdevices)
+		}
 		for i := range d.Blockdevices {
 			clearPknameRecursive(&d.Blockdevices[i])
 		}
-		if action == "detail" || action == "gfs" {
-			d.Blockdevices = filterDetailSingles(d.Blockdevices)
+		if action == "detail" {
+			if detailModeKnown && detailMultipathMode {
+				d.Blockdevices = reconcileMultipathLLDevices(d.Blockdevices, detailMaps)
+			} else if !detailModeKnown {
+				d.Blockdevices = filterDetailSingles(d.Blockdevices)
+			}
 		}
 	} else {
 		d.Blockdevices = filtered

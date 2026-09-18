@@ -9,6 +9,17 @@ import (
 
 const PCSClusterMaxHosts = 16
 
+const (
+	GFSDefaultJournalSizeMB       = 512
+	GFSMinJournalSizeMB           = 8
+	GFSMaxJournalSizeMB           = 1024
+	GFSDefaultResourceGroupSizeMB = 1024
+	GFSMinResourceGroupSizeMB     = 32
+	GFSMaxResourceGroupSizeMB     = 2048
+	GFSJournalSizeDescription     = "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 8MB~1024MB입니다. 예: 128MB, 256MB, 512MB"
+	GFSResourceGroupDescription   = "MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 32MB~2048MB입니다."
+)
+
 type TypeClusterConfig struct {
 	Data map[string]any `json:"-"`
 	mu   *sync.RWMutex
@@ -257,6 +268,8 @@ type ClusterConfigResponse struct {
 type ClusterConfigSection struct {
 	// cluster type
 	Type string `json:"type" example:"ablestack-vm"`
+	// latest cluster host operation: new/add
+	HostType string `json:"hostType,omitempty" example:"add"`
 	// backup path for ccvm
 	BackupPath string `json:"backup_path" example:"/mnt/glue-gfs/backup/ccvm"`
 	// ccvm config
@@ -265,6 +278,8 @@ type ClusterConfigSection struct {
 	MngtNic ClusterMngtNicConfig `json:"mngtNic"`
 	// pcs cluster IPs
 	PCSCluster ClusterPCSClusterConfig `json:"pcsCluster"`
+	// GFS2 filesystem format settings
+	GFS ClusterGFSConfig `json:"gfs"`
 	// host list
 	Hosts []ClusterHost `json:"hosts"`
 	// external timeserver
@@ -273,6 +288,19 @@ type ClusterConfigSection struct {
 	StorageNetwork string `json:"storage_network" example:"false"`
 	// storage network usage (deprecated: use storage_network)
 	DeprecatedIscsiStorage string `json:"iscsi_storage,omitempty" swaggerignore:"true"`
+}
+
+// ClusterGFSConfig describes mkfs.gfs2 sizing values stored in cluster.json.
+// @name ClusterGFSConfig
+type ClusterGFSConfig struct {
+	// GFS2 journal size in MB. Must be a power of two between 8 and 1024.
+	JournalSizeMB int `json:"journal_size_mb" example:"512"`
+	// Human-readable journal size constraint stored with cluster.json.
+	JournalSizeDescription string `json:"journal_size_description" example:"MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 8MB~1024MB입니다."`
+	// GFS2 resource group size in MB. Must be a power of two between 32 and 2048.
+	ResourceGroupSizeMB int `json:"resource_group_size_mb" example:"1024"`
+	// Human-readable resource group size constraint stored with cluster.json.
+	ResourceGroupDescription string `json:"resource_group_size_description" example:"MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 32MB~2048MB입니다."`
 }
 
 func (c *ClusterConfigSection) UnmarshalJSON(data []byte) error {
@@ -507,7 +535,7 @@ type ClusterSecurityPatchConfig struct {
 // SystemConfigRequest describes the request body for system config APIs.
 // @name SystemConfigRequest
 type SystemConfigRequest struct {
-	// action: status/update/allUpdate/reset
+	// action: status/update/allUpdate/reset/gfs-configure
 	Action string `json:"action" example:"status"`
 	// option: all (fan-out to all ablecube hosts)
 	Option string `json:"option,omitempty" example:"all"`

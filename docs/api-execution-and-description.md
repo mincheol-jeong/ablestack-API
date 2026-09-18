@@ -8,8 +8,8 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 기본 URL | `http://<ablecube-ip>:8090/api/v1` |
-| Swagger | `http://<ablecube-ip>:8090/swagger/index.html` |
+| 기본 URL | `http://<ablecube-ip>:18090/api/v1` |
+| Swagger | `http://<ablecube-ip>:18090/swagger/index.html` |
 | API 서버 진입점 | `cmd/apiserver/main.go` |
 | 주요 handler | `internal/handler` |
 | 주요 model | `internal/model` |
@@ -18,7 +18,7 @@
 | VM 설정 생성물 | `/etc/ablestack/vmconfig` |
 | XML 템플릿 | `/etc/ablestack/xml-template` |
 
-주의: 현재 `main.go`의 listen port는 `8090`으로 고정되어 있다. `ABLESTACK_API_PORT`는 서버 listen port가 아니라 노드 간 원격 API URL을 만들 때 사용된다. RPM 설치 시 `firewall-cmd`가 있으면 `8090/tcp`를 runtime/permanent 모두 열고, `firewalld`가 꺼져 있으면 `enable --now`를 시도한다.
+`ABLESTACK_API_PORT`는 서버 listen port와 노드 간 원격 API URL에 함께 사용되며 기본값은 `18090`이다. RPM 포트를 변경하면 새 포트를 방화벽에 먼저 추가하고 서비스를 재시작한 뒤 listen 상태를 확인하며, 성공한 경우에만 기존 포트의 runtime/permanent 방화벽 규칙을 제거한다.
 
 Swagger tag는 `Cube-License`, `Cube-Nic`, `Glue-RGW`, `Glue-GlueFS`처럼 기능 단위로 나뉜다. host/CCVM에서 Swagger `doc.json`을 요청하면 Glue path와 Glue model definition을 런타임에 제거한다. SCVM에서 요청하면 Glue 중심 화면이 되도록 Cube 운영/내부 통신 API path/tag를 숨기고, 인증, health, version, license 계열 API만 남긴다. 실제 route는 제거하지 않으므로 내부 fan-out 통신은 그대로 동작한다.
 
@@ -32,7 +32,7 @@ RPM은 `cmd/apiserver/main.go`를 `/usr/bin/ablestack-api`로 빌드하고 syste
 ./scripts/build-rpm.sh
 ```
 
-기본 RPM 버전은 루트의 `VERSION` 파일에서 읽는다. `scripts/build-rpm.sh`는 `CHANGELOG.md`에 같은 버전의 릴리즈 섹션이 있는지도 확인한다. 릴리즈 번호는 기본값 `1`을 사용하고, 필요하면 `RELEASE=2 ./scripts/build-rpm.sh`처럼 override한다.
+기본 RPM 버전은 루트의 `VERSION` 파일에서 읽는다. `scripts/build-rpm.sh`는 `CHANGELOG.md`에 같은 버전의 릴리즈 섹션이 있는지도 확인한다. 릴리즈 번호는 기본값 `1`을 사용하고, 필요하면 `RELEASE=2 ./scripts/build-rpm.sh`처럼 override한다. 포트 변경 빌드는 `API_PORT=28090 ./scripts/build-rpm.sh`를 사용하고 직접 `rpmbuild`할 때는 `--define "api_port 28090"`을 지정한다.
 
 생성 위치:
 
@@ -55,6 +55,14 @@ dnf install "dist/rpm/rpmbuild/RPMS/x86_64/ablestack-api-$(cat VERSION)-1.el9.x8
 dnf upgrade "dist/rpm/rpmbuild/RPMS/x86_64/ablestack-api-$(cat VERSION)-1.el9.x86_64.rpm"
 ```
 
+설치 후 운영 포트를 바꿀 때는 RPM에 포함된 helper를 실행한다.
+
+```bash
+sudo /usr/libexec/ablestack-api/configure-api-port.sh 28090
+```
+
+helper는 새 runtime/permanent 방화벽 규칙 추가, `/etc/ablestack/ablestack-api.env` 갱신, 서비스 재시작, 새 포트 listen 확인, 기존 방화벽 규칙 제거를 순서대로 수행한다. 새 포트가 열리지 않으면 기존 env와 서비스 포트로 복구하고 실패한 새 방화벽 규칙을 제거한다. env를 직접 수정하면 방화벽은 자동 변경되지 않으므로 helper 사용을 기본 운영 절차로 한다. 이후 RPM 업그레이드는 env에 저장된 유효한 운영 포트를 보존하며, 포트 값이 없는 구버전 설치본만 기본값 `18090`으로 이전한다.
+
 ### RPM 설치 시 자동 처리
 
 | 처리 | 설명 |
@@ -67,8 +75,8 @@ dnf upgrade "dist/rpm/rpmbuild/RPMS/x86_64/ablestack-api-$(cat VERSION)-1.el9.x8
 | shell 리소스 설치 | `/etc/ablestack/shell/*` |
 | VM 설정 디렉터리 생성 | `/etc/ablestack/vmconfig/ccvm`, `/etc/ablestack/vmconfig/scvm` |
 | 설정 병합 | 기존 JSON 값은 유지하고 누락된 key만 추가 |
-| 방화벽 처리 | `firewall-cmd`가 있으면 `firewalld enable --now`, `8090/tcp` open |
-| API 서비스 처리 | `systemctl enable --now ablestack-api.service`, 업데이트 시 `try-restart` |
+| 방화벽 처리 | `firewall-cmd`가 있으면 `firewalld enable --now`, `18090/tcp` open |
+| API 서비스 처리 | `systemctl enable/start ablestack-api.service`, 업데이트 시 새 포트로 restart 및 listen 확인 |
 
 ### RPM dependency 기준
 
@@ -76,14 +84,16 @@ dnf upgrade "dist/rpm/rpmbuild/RPMS/x86_64/ablestack-api-$(cat VERSION)-1.el9.x8
 
 | 구분 | 패키지/명령 | 설명 |
 | --- | --- | --- |
-| Hard dependency | `systemd`, `bash`, `python3` | 서비스 등록, shell 리소스 실행, JSON/helper 처리에 필요 |
+| Hard dependency | `systemd`, `bash`, `python3` | 서비스 등록과 보안 증적·Samba·shell helper 실행에 필요. Linux 인증과 CCVM 자동 백업은 Go에서 처리 |
 | Build dependency | `golang >= 1.26.2`, `libvirt-devel`, `pkgconfig` | RPM 빌드 서버에서만 필요 |
-| Recommended | `firewalld` | 있으면 설치 시 8090/tcp 오픈 |
+| Recommended | `firewalld` | 있으면 설치 시 18090/tcp 오픈 |
 | Runtime command | `pcs`, `virsh`, `qemu-img`, `genisoimage`, `ssh/scp`, `ceph`, `rbd`, `radosgw-admin`, `podman`, `smbpasswd`, `pdbedit`, `realm`, `lsblk`, `nmcli` | 해당 기능 실행 시 필요. RPM 설치를 막지는 않음 |
 
 예를 들어 `pcs`가 없는 저장소에서도 RPM 설치는 가능해야 한다. 단, PCS 관련 API를 호출하면 실제 명령이 없으므로 해당 API에서 실패한다.
 
 SCVM 전용 Glue API가 사용하는 Ceph, podman, Samba, realmd 계열 명령은 SCVM 이미지 또는 SCVM role 패키지에서 제공한다. `ablestack-api` RPM은 host/SCVM/CCVM 공통 패키지이므로 이러한 role-specific 명령을 hard dependency로 추가하지 않는다.
+
+CCVM Wall 모니터링 구성은 `/usr/share/ablestack/ablestack-wall/python`의 `host_ping_test.py`, `config_netdive.py`, `start_services.py`, `config_wall.py`, `config_loki.py`, `config_smtp.py`와 해당 Python 모듈을 사용한다. 이 자산은 CCVM Wall 이미지에서 제공해야 하며 Host와 SCVM의 공통 API RPM 의존성으로 강제하지 않는다. 스크립트나 모듈이 없는 CCVM에서는 API가 해당 실행 단계를 구체적인 원인과 함께 실패 처리한다.
 
 ### 업데이트 시 설정 보존
 
@@ -158,7 +168,7 @@ SCVM 전용 Glue API가 사용하는 Ceph, podman, Samba, realmd 계열 명령�
 | `ABLESTACK_LOG_ARCHIVE_DIR` | `/var/log/ablestack/archive` | 날짜가 지난 로그 gzip archive 경로 |
 | `ABLESTACK_LOG_RETENTION_DAYS` | `90` | archive 로그 보관 기간(일) |
 | `ABLESTACK_API_SCHEME` | `http` | 노드 간 API 호출 scheme |
-| `ABLESTACK_API_PORT` | `8090` | 노드 간 API 호출 대상 port |
+| `ABLESTACK_API_PORT` | `18090` | 서버 listen 및 노드 간 API 호출 대상 port |
 | `ABLESTACK_NODE_ROLE` | 없음 | 노드 역할 override. `/api/v1/glue` route는 `scvm`일 때만 등록 |
 | `ABLESTACK_NODE_ROLE_FILE` | `/etc/ablestack/node-role` | 노드 역할 파일 경로 override |
 | `ABLESTACK_SECURITY_PATCH_SCRIPT` | `/usr/local/sbin/security_patch.sh` | 보안 패치 스크립트 override |
@@ -169,7 +179,7 @@ SCVM 전용 Glue API가 사용하는 Ceph, podman, Samba, realmd 계열 명령�
 systemctl status ablestack-api.service
 journalctl -u ablestack-api.service -f
 tail -f /var/log/ablestack/api.log /var/log/ablestack/detail.log /var/log/ablestack/job.log
-curl -sS http://127.0.0.1:8090/api/v1/cube/cluster/health
+curl -sS http://127.0.0.1:18090/api/v1/cube/cluster/health
 ```
 
 ## 전체 구조
@@ -202,7 +212,7 @@ Client or Web UI
 ### Health check
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/cluster/health
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/cluster/health
 ```
 
 응답 예:
@@ -216,7 +226,7 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/cluster/health
 ### JSON POST 기본 형식
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/<path> \
+curl -X POST http://<ablecube-ip>:18090/api/v1/<path> \
   -H "Content-Type: application/json" \
   -d '{"action":"status"}'
 ```
@@ -239,7 +249,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/<path> \
 | 배포 실행 | GET | `/cube/deploy/jobs` | 없음 | 최근 올인원 배포 job 목록 조회 |
 | 배포 실행 | GET | `/cube/deploy/jobs/{job_id}` | path `job_id` | 올인원 배포 job 상세 상태 조회 |
 | SCVM | POST | `/cube/scvm/bootstrap` | `run_script` | 대표 SCVM의 `/root/bootstrap.sh` 실행 후 SCVM API health, 라이선스 등록/status 확인 |
-| CCVM | POST | `/cube/ccvm/bootstrap` | `run_script` | CCVM의 `/root/bootstrap.sh` 실행 후 CCVM API health, 라이선스 등록/status 확인 |
+| CCVM | POST | `/cube/ccvm/bootstrap` | `run_script` | 라이선스가 등록된 CCVM의 `/root/bootstrap.sh` 실행 후 API health와 라이선스 status 확인 |
 | 클러스터 | GET | `/cube/cluster/config` | 없음 | 다운로드용 `clusterConfig`와 `security` 조회 |
 | 클러스터 | POST | `/cube/cluster/apply` | `insert,remove,reset,check` | 클러스터 구성 오케스트레이션 |
 | 클러스터 | POST | `/cube/cluster/apply-local` | 내부용 | 각 노드에서 실제 cluster config 적용 |
@@ -250,7 +260,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/<path> \
 | CloudInit | POST | `/cube/cloudinit/scvm/generate` | 없음 | 현재 노드와 `cluster.json` 기반 SCVM cloud-init ISO 생성 |
 | CCVM | GET | `/cube/ccvm/status` | 없음 | CCVM 상태 조회 |
 | CCVM | POST | `/cube/ccvm/xml` | body | CCVM libvirt XML 생성 및 대상 노드 배포 |
-| CCVM | POST | `/cube/ccvm/lifecycle` | `setup,reset,copy,start,stop,restart,delete` | Cloud Center VM lifecycle |
+| CCVM | POST | `/cube/ccvm/lifecycle` | `initialize,setup,reset,copy,start,stop,restart,delete` | Cloud Center VM lifecycle |
 | CCVM | POST | `/cube/ccvm/edit` | body | CCVM CPU/메모리 XML 수정 |
 | CCVM | POST | `/cube/ccvm/secondary/resize` | body | CCVM secondary 용량 추가 |
 | CCVM | POST | `/cube/ccvm/service/control` | `start,restart,stop,status` | CCVM의 서비스 제어 |
@@ -383,13 +393,13 @@ SCVM template/cloud-init에는 `ABLESTACK_NODE_ROLE=scvm` 또는 `/etc/ablestack
 예시:
 
 ```bash
-curl -sS http://<scvm-ip>:8090/api/v1/glue/status \
+curl -sS http://<scvm-ip>:18090/api/v1/glue/status \
   -H "Authorization: Bearer <access_token>"
 
-curl -sS "http://<scvm-ip>:8090/api/v1/glue/pool?pool_type=rbd" \
+curl -sS "http://<scvm-ip>:18090/api/v1/glue/pool?pool_type=rbd" \
   -H "Authorization: Bearer <access_token>"
 
-curl -X POST http://<scvm-ip>:8090/api/v1/glue/image \
+curl -X POST http://<scvm-ip>:18090/api/v1/glue/image \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{"pool_name":"rbd","image_name":"vm01","size":10}'
@@ -417,13 +427,13 @@ API access token 서명값은 활성 라이선스의 `license_key`에서 파생�
 기본값은 `root` 사용자 또는 `wheel` 그룹 사용자를 허용한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/auth/login \
+curl -X POST http://<ablecube-ip>:18090/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"id":"root","password":"<linux-password>"}'
 ```
 
 ```bash
-curl http://<ablecube-ip>:8090/api/v1/auth/me \
+curl http://<ablecube-ip>:18090/api/v1/auth/me \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -454,7 +464,7 @@ Cockpit UI에서는 `cockpit.spawn()`으로 helper를 호출하고 `authorizatio
 const raw = await cockpit.spawn(["/usr/bin/ablestack-auth-token"]);
 const token = JSON.parse(raw).authorization;
 
-const response = await cockpit.fetch("http://127.0.0.1:8090/api/v1/cube/hosts", {
+const response = await cockpit.fetch("http://127.0.0.1:18090/api/v1/cube/hosts", {
   headers: {
     Authorization: token
   }
@@ -486,7 +496,7 @@ API access token 서명값은 활성 라이선스의 `license_key`에서 파생�
 내부 token 교체는 아래 API로 수행한다. 이 API는 현재 `cluster.json`의 `hosts[].ablecube` 대상에 새 token을 적용한 뒤 현재 호스트의 token도 교체한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/auth/internal-token/rotate \
+curl -X POST http://<ablecube-ip>:18090/api/v1/auth/internal-token/rotate \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -504,16 +514,16 @@ X-Cube-Internal-Token: <current-security.internal_token>
 기본 호출은 API 서버 생존 확인이다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/cluster/health
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/cluster/health
 ```
 
 대상 노드 점검:
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=host"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=scvm"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=ccvm"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=host,scvm"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=host"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=scvm"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=ccvm"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=host,scvm"
 ```
 
 특정 이름만 점검할 때는 `target_hostname`을 콤마로 여러 개 지정한다. 이름 규칙은 option별로 다르다.
@@ -525,15 +535,15 @@ curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=host,scvm"
 | `ccvm` | 고정값 `ccvm` |
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=host&target_hostname=ablecube31-1,ablecube31-2"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=scvm&target_hostname=scvm1,scvm2"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?option=host,scvm,ccvm&target_hostname=NV1,scvm1,ccvm"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=host&target_hostname=ablecube31-1,ablecube31-2"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=scvm&target_hostname=scvm1,scvm2"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?option=host,scvm,ccvm&target_hostname=NV1,scvm1,ccvm"
 ```
 
 `option` 없이 `target_hostname`만 지정하면 이름으로 role을 추론한다.
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?target_hostname=NV1,scvm1,ccvm"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/cluster/health?target_hostname=NV1,scvm1,ccvm"
 ```
 
 ### `GET /cube/cluster/config`
@@ -541,7 +551,7 @@ curl -sS "http://<ablecube-ip>:8090/api/v1/cube/cluster/health?target_hostname=N
 `cluster.json` 다운로드에 필요한 `clusterConfig`와 `security`를 반환한다. `systemProfile`은 운영 상태라 다운로드 구성 파일에서는 제외한다. `security.internal_token`이 아직 없으면 이 조회 과정에서 생성해 응답에 포함한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/cluster/config
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/cluster/config
 ```
 
 ### `GET /cube/deploy/status`
@@ -549,7 +559,7 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/cluster/config
 기존 개별 상태 API는 유지하고, UI가 배포 진행 화면을 단순하게 처리할 수 있도록 현재 배포 단계를 의미형 enum으로 반환한다. `ccfg_status`는 `clusterConfig`의 필수 값이 채워졌는지로 계산하고, `wall_monitoring_status`는 `systemProfile.bootstrap.wall` 값을 사용한다. `ablestack-vm`도 CloudCenter PCS/resource 상태를 사용하므로 `pcsCluster.hostnameN`이 구성 준비 완료 조건에 포함된다. `ablestack-vm`은 PCS 대상 1대부터 가능하고, `ablestack-hci`, `ablestack-hci-filesystem`은 기본 3대 이상이 필요하다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/deploy/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/deploy/status
 ```
 
 대표 응답:
@@ -636,7 +646,7 @@ UI는 `stage`, `message_key`, `available_actions`를 기준으로 화면 상태�
 
 기존 개별 API를 유지한 상태에서 설치/배포 단계를 한 번의 job으로 순차 실행한다. 이 API는 HTTP 요청을 오래 붙잡지 않고 `202 Accepted`와 `job_id`를 반환하며, 실제 작업은 서버 내부 goroutine에서 진행한다. 진행 상태는 `/cube/deploy/jobs/{job_id}`로 조회한다.
 
-최초 라이선스가 전혀 없는 신규 장비에서는 운영 API가 차단되므로, 먼저 마스터 노드에 `/cube/license`로 라이선스를 등록한 뒤 Bearer token을 발급받고 `/cube/deploy/run` 또는 `/cube/license/apply`를 실행한다. `/cube/deploy/run`의 `license_apply` 단계는 마스터에 등록된 현재 라이선스 파일을 전체 ablecube host로 배포하거나, 요청 body의 `license_content`/`licenses` 값을 사용한다. SCVM/CCVM은 VM 생성 후 `scvm_bootstrap`/`ccvm_bootstrap` 단계에서 host qemu-guest-agent로 VM 내부 `/root/bootstrap.sh`를 실행하고, VM API health 확인 후 라이선스를 자동 등록한다.
+최초 라이선스가 전혀 없는 신규 장비에서는 운영 API가 차단되므로, 먼저 마스터 노드에 `/cube/license`로 라이선스를 등록한 뒤 Bearer token을 발급받고 `/cube/deploy/run` 또는 `/cube/license/apply`를 실행한다. `/cube/deploy/run`의 `license_apply` 단계는 마스터에 등록된 현재 라이선스 파일을 전체 ablecube host로 배포하거나, 요청 body의 `license_content`/`licenses` 값을 사용한다. 단독 Cloud VM 구성은 CCVM 시작 후 `/cube/license/apply`의 `roles:["ccvm"]`, `wait_for_ready:true`로 라이선스를 등록하고, 별도의 클라우드센터 구성 단계에서 `/cube/ccvm/bootstrap`을 실행한다.
 
 기본 실행 순서:
 
@@ -649,7 +659,7 @@ UI는 `stage`, `message_key`, `available_actions`를 기준으로 화면 상태�
 | `storage_prepare` | VM/HCI-FS 등에서 GFS/PCS 스토리지 준비 실행 | `gfs` |
 | `local_prepare` | Standalone에서 로컬 디스크 준비 실행 | `local` |
 | `ccvm_prepare` | CCVM cloud-init, XML, lifecycle setup 실행 후 `/api/v1/health` 확인 | `ccvm_cloudinit`, `ccvm_xml`, `ccvm_lifecycle` |
-| `ccvm_bootstrap` | CCVM의 `/root/bootstrap.sh` 실행, CCVM API health 확인, 라이선스 자동 등록, license status 확인 | `run_bootstrap_script`, `license_content`, `licenses`, `license_filename` |
+| `ccvm_bootstrap` | 올인원에서는 CCVM 라이선스 등록 후 `/root/bootstrap.sh` 실행, CCVM API health와 license status 확인 | `run_bootstrap_script`, `license_content`, `licenses`, `license_filename` |
 | `system_profile` | 성공한 step 기준으로 `systemProfile` 플래그를 전체 host에 반영 | `update_system_profile` |
 
 `system_profile` 단계는 성공한 step만 반영한다. `license_apply` 성공 시 `license.status=true`와 복호화된 라이선스 `oem` 기반 `license.type`을 적용하고, `scvm_bootstrap` 성공 시 `bootstrap.scvm=true`, `storage_prepare` 성공 시 VM/HCI-FS의 `bootstrap.gfs_configure=true`, `local_prepare` 성공 시 Standalone의 `bootstrap.local_configure=true`, `ccvm_bootstrap` 성공 시 `bootstrap.ccvm=true`를 적용한다. 모니터링 구성 완료를 뜻하는 `bootstrap.wall`은 별도 모니터링 구성 API/절차에서 반영한다.
@@ -663,7 +673,7 @@ job 정보는 현재 프로세스 메모리에만 보관한다. API 서버가 �
 전체 실행 예:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/deploy/run \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -712,7 +722,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
 부분 실행 예:
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/deploy/run \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -755,7 +765,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/deploy/run \
 최근 올인원 배포 job 목록을 최신순으로 반환한다.
 
 ```bash
-curl -sS http://<master-ablecube-ip>:8090/api/v1/cube/deploy/jobs \
+curl -sS http://<master-ablecube-ip>:18090/api/v1/cube/deploy/jobs \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -764,7 +774,7 @@ curl -sS http://<master-ablecube-ip>:8090/api/v1/cube/deploy/jobs \
 특정 job의 현재 상태, 현재 실행 step, step별 시작/종료 시각, 결과 payload를 반환한다.
 
 ```bash
-curl -sS http://<master-ablecube-ip>:8090/api/v1/cube/deploy/jobs/<job_id> \
+curl -sS http://<master-ablecube-ip>:18090/api/v1/cube/deploy/jobs/<job_id> \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -839,7 +849,7 @@ HCI/HCI-filesystem 계열은 SCVM 관련 IP가 필요하므로 `hosts`에 아래
 `insert` 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cluster/apply \
   -H "Content-Type: application/json" \
   -d '{
     "action": "insert",
@@ -876,7 +886,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
 `remove` 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cluster/apply \
   -H "Content-Type: application/json" \
   -d '{"action":"remove","remove_hostname":"ablecube12-3"}'
 ```
@@ -884,7 +894,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
 `reset` 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cluster/apply \
   -H "Content-Type: application/json" \
   -d '{"action":"reset"}'
 ```
@@ -892,7 +902,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
 `check` 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cluster/apply \
   -H "Content-Type: application/json" \
   -d '{"action":"check","option":"all"}'
 ```
@@ -908,7 +918,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cluster/apply \
 `cluster.json`의 `systemProfile`을 반환한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/system/config
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/system/config
 ```
 
 ### `POST /cube/system/config`
@@ -925,7 +935,7 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/system/config
 조회:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/system/config \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/system/config \
   -H "Content-Type: application/json" \
   -d '{"action":"status","depth1":"bootstrap","depth2":"scvm"}'
 ```
@@ -933,7 +943,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/system/config \
 전체 fan-out 수정:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/system/config \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/system/config \
   -H "Content-Type: application/json" \
   -d '{"action":"update","depth1":"bootstrap","depth2":"wall","value":"true","option":"all"}'
 ```
@@ -945,7 +955,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/system/config \
 `/etc/hosts`를 읽고 localhost, management/public/client network, role 기준으로 정리해 반환한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/hosts
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/hosts
 ```
 
 ### `GET /cube/disk`
@@ -963,9 +973,9 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/hosts
 | `view=list` | list view |
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/disk?action=list"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/disk?action=gfs"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/disk?action=detail&view=flat"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/disk?action=list"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/disk?action=gfs"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/disk?action=detail&view=flat"
 ```
 
 ### `POST /cube/multipath/sync`
@@ -980,11 +990,11 @@ curl -sS "http://<ablecube-ip>:8090/api/v1/cube/disk?action=detail&view=flat"
 | `rescan` | 각 host에서 `/sys/class/scsi_host/*/scan`만 실행 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/multipath/sync \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/multipath/sync \
   -H "Content-Type: application/json" \
   -d '{"action":"sync"}'
 
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/multipath/sync \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/multipath/sync \
   -H "Content-Type: application/json" \
   -d '{"action":"rescan"}'
 ```
@@ -999,8 +1009,8 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/multipath/sync \
 | `action=detail` | MAC, IPv4, IPv6, members, speed, bond option 등 상세 목록 |
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/nics?action=list"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/nics?action=detail"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/nics?action=list"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/nics?action=detail"
 ```
 
 ## URL API
@@ -1010,9 +1020,9 @@ curl -sS "http://<ablecube-ip>:8090/api/v1/cube/nics?action=detail"
 Cloud Center, Wall Center, Storage Center 접속 URL을 반환한다.
 
 ```bash
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/url?option=cloudCenter"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/url?option=wallCenter"
-curl -sS "http://<ablecube-ip>:8090/api/v1/cube/url?option=storageCenter"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/url?option=cloudCenter"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/url?option=wallCenter"
+curl -sS "http://<ablecube-ip>:18090/api/v1/cube/url?option=storageCenter"
 ```
 
 ## CloudInit API
@@ -1037,7 +1047,7 @@ cloud-init API는 CCVM/SCVM 부팅에 필요한 ISO를 생성한다. 공통으�
 서비스 네트워크가 없으면 빈 body로 호출할 수 있다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/ccvm/generate \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cloudinit/ccvm/generate \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
@@ -1045,7 +1055,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/ccvm/generate \
 서비스 네트워크가 있으면 `sn_*` 값을 전달한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/ccvm/generate \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cloudinit/ccvm/generate \
   -H "Content-Type: application/json" \
   -d '{
     "sn_nic": "enp0s21",
@@ -1073,7 +1083,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/ccvm/generate \
 | prefix/gw/dns | `clusterConfig.mngtNic` |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/scvm/generate
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/cloudinit/scvm/generate
 ```
 
 ## CCVM API
@@ -1083,7 +1093,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/cloudinit/scvm/generate
 CCVM 상태를 조회한다. libvirt/qemu-guest-agent 정보를 함께 사용한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/ccvm/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/ccvm/status
 ```
 
 ### `POST /cube/ccvm/xml`
@@ -1106,13 +1116,13 @@ cluster type별 disk 처리:
 | --- | --- |
 | HCI secret | HCI/HCI-filesystem일 때만 `hosts[].ablecube` 대상에 secret 생성 API fan-out |
 | XML 생성 | 요청 받은 노드에서 템플릿을 렌더링 |
-| XML 설치 | `hosts[].ablecubePn` 대상의 `/etc/ablestack/vmconfig/ccvm/ccvm.xml`로 fan-out |
+| XML 설치 | HCI 계열과 스토리지 전용망을 사용하는 VM은 `hosts[].ablecubePn`, 스토리지 전용망을 사용하지 않는 VM은 `hosts[].ablecube` 대상의 `/etc/ablestack/vmconfig/ccvm/ccvm.xml`로 fan-out |
 | 서비스 네트워크 | `service_network_bridge`가 있으면 두 번째 NIC XML 추가 |
 
 `ablestack-vm` 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/xml \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/xml \
   -H "Content-Type: application/json" \
   -d '{
     "cpu": 4,
@@ -1126,7 +1136,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/xml \
 HCI 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/xml \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/xml \
   -H "Content-Type: application/json" \
   -d '{
     "cpu": 4,
@@ -1134,6 +1144,12 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/xml \
     "management_network_bridge": "br0"
   }'
 ```
+
+### `POST /cube/ccvm/create`
+
+CCVM XML과 제품 타입별 backing image를 준비하고 PCS `cloudcenter_res`를 비활성 상태로 생성한다. HCI 계열은 RBD를 사용하고, ABLESTACK-VM은 `/mnt/glue-gfs`의 공유 이미지와 XML을 사용한다. 생성 후 `/cube/ccvm/lifecycle`의 `start` action으로 CCVM을 시작한다.
+
+요청 body는 `/cube/ccvm/xml`과 동일하다.
 
 ### `POST /cube/ccvm/lifecycle`
 
@@ -1143,7 +1159,8 @@ Cloud Center VM lifecycle 작업을 수행한다.
 
 | Action | 설명 |
 | --- | --- |
-| `setup` | CCVM setup |
+| `initialize` | 재배포 전에 기존 `cloudcenter_res`가 있으면 제거하고 `/mnt/glue-gfs/ccvm*`만 정리. 리소스나 PCS가 없으면 정상 통과 |
+| `setup` | HCI 계열은 RBD CCVM 이미지를, ABLESTACK-VM은 `/mnt/glue-gfs`의 공유 CCVM 이미지/XML을 준비한 뒤 PCS 리소스를 생성하고 시작 |
 | `reset` | cluster type에 따라 CCVM/PCS/GFS/local disk 초기화 |
 | `copy` | CCVM 관련 파일 복사 |
 | `start` | CCVM 시작 |
@@ -1152,13 +1169,13 @@ Cloud Center VM lifecycle 작업을 수행한다.
 | `delete` | CCVM 삭제. `purge=true`면 이미지까지 삭제 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/lifecycle \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/lifecycle \
   -H "Content-Type: application/json" \
   -d '{"action":"start"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/lifecycle \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/lifecycle \
   -H "Content-Type: application/json" \
   -d '{"action":"delete","purge":true}'
 ```
@@ -1177,7 +1194,7 @@ cluster type별 동작:
 | `ablestack-hci-filesystem` | HCI와 동일하게 각 host 로컬 XML 수정 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/edit \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/edit \
   -H "Content-Type: application/json" \
   -d '{"cpu":"16","memory":"32"}'
 ```
@@ -1187,7 +1204,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/edit \
 CCVM secondary 용량을 1~500 GiB 범위에서 추가한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/secondary/resize \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/secondary/resize \
   -H "Content-Type: application/json" \
   -d '{"add_size":100}'
 ```
@@ -1197,12 +1214,39 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/secondary/resize \
 CCVM의 서비스 제어 요청을 CCVM 노드로 전달한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/service/control \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/service/control \
   -H "Content-Type: application/json" \
   -d '{"action":"restart","service_name":"mold"}'
 ```
 
 지원 action: `start`, `restart`, `stop`, `status`
+
+### `POST /cube/ccvm/monitoring/config`
+
+`action=configure`는 Host API가 `cluster.json`의 CCVM `/health`를 먼저 확인하고 CCVM API로 요청을 전달한 뒤, CCVM에 설치된 기존 Wall Python 도구를 다음 순서로 실행한다. Python 프로세스에는 `ABLESTACK_CLUSTER_JSON=/etc/ablestack/properties/cluster.json`을 전달한다. `--ccvm`, `--cube`, `--scvm` 값은 요청 body가 아니라 해당 `cluster.json`의 `ccvm.ip`, `hosts[].ablecube`, `hosts[].scvmMngt`에서만 생성한다.
+
+1. `host_ping_test.py -hns <ccvm> <cube...> <scvm...>`
+2. `config_netdive.py config --ccvm <ccvm> --cube <cube...>`
+3. `start_services.py stop --service <wall services...>`
+4. `config_wall.py config --ccvm <ccvm> --cube <cube...> [--scvm <scvm...>]`
+5. `start_services.py start --service <wall services...>`
+6. SMTP 선택 시 `config_smtp.py config --host <host:port> --user <user> --password <password>`
+
+`config_wall.py config`가 기존 방식대로 Grafana/Prometheus 설정과 `config_loki.py` 실행을 담당한다. API는 각 스크립트 stdout의 JSON `code`를 검사하고, 마지막에 Prometheus, Node/Process/Blackbox exporter, Grafana, Netdive Analyzer, Loki, Promtail이 모두 active/enabled인지 최대 90초 확인한다. 모든 단계와 전체 호스트의 `bootstrap.wall=true` 반영이 성공해야 HTTP 200을 반환한다.
+
+```bash
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/monitoring/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action":"configure",
+    "ccvm":["10.10.31.10"],
+    "cube":["10.10.31.1","10.10.31.2"],
+    "scvm":["10.10.31.11","10.10.31.12"],
+    "smtp":{"enabled":false}
+  }'
+```
+
+클라우드 클러스터 상태 카드의 수집 정보 재갱신은 `{"action":"update"}`를 사용한다. 이 경우 `cluster.json` 주소를 기본값으로 `config_wall.py update --ccvm <ccvm> --cube <cube...> [--scvm <scvm...>]`를 실행하고 실제 서비스 상태를 다시 검증한다.
 
 ## CCVM Snapshot API
 
@@ -1217,13 +1261,13 @@ HCI/HCI-filesystem 환경에서 RBD 기반 CCVM snapshot을 관리한다.
 | `rollback` | 지정 snapshot으로 rollback. CCVM 정지 상태 필요 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/snap \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/snap \
   -H "Content-Type: application/json" \
   -d '{"action":"list"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/snap \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/snap \
   -H "Content-Type: application/json" \
   -d '{"action":"rollback","snap_name":"auto-2026-04-30"}'
 ```
@@ -1250,7 +1294,7 @@ VM/Standalone 계열에서 virsh backup 기반 CCVM 파일 백업과 스케줄�
 즉시 백업:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/backup \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/backup \
   -H "Content-Type: application/json" \
   -d '{"action":"backup","target_dir":"/mnt/glue-gfs/backup/ccvm"}'
 ```
@@ -1258,7 +1302,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/backup \
 일간 스케줄:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/backup \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/backup \
   -H "Content-Type: application/json" \
   -d '{"action":"schedule","repeat":"daily","time":"01:00"}'
 ```
@@ -1268,7 +1312,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/backup \
 백업 파일로 CCVM 디스크를 복구한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/restore \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ccvm/restore \
   -H "Content-Type: application/json" \
   -d '{"target_file":"ccvm.qcow2-20260430_010000"}'
 ```
@@ -1280,7 +1324,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ccvm/restore \
 Storage Center VM 상태를 조회한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/scvm/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/scvm/status
 ```
 
 ### `POST /cube/scvm/xml`
@@ -1314,7 +1358,7 @@ storage traffic network type:
 bridge 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/scvm/xml \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/scvm/xml \
   -H "Content-Type: application/json" \
   -d '{
     "cpu": 4,
@@ -1331,7 +1375,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/scvm/xml \
 NIC passthrough 예:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/scvm/xml \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/scvm/xml \
   -H "Content-Type: application/json" \
   -d '{
     "cpu": 4,
@@ -1361,13 +1405,13 @@ Storage Center VM lifecycle 작업을 수행한다. 오케스트레이터가 `cl
 | `resource` | CPU/메모리 변경. `cpu` 또는 `memory` 필요 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/scvm/lifecycle \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/scvm/lifecycle \
   -H "Content-Type: application/json" \
   -d '{"action":"start","target":"10.10.31.2"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/scvm/lifecycle \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/scvm/lifecycle \
   -H "Content-Type: application/json" \
   -d '{"action":"resource","cpu":4,"memory":16}'
 ```
@@ -1383,7 +1427,7 @@ Cloud Center PCS cluster/resource를 제어한다.
 | Action | 설명 | 주요 필드 |
 | --- | --- | --- |
 | `setup` | cluster.json 기준 PCS setup | 내부 설정 |
-| `setup-cron` | CCVM snapshot cron 배포 | 내부 설정 |
+| `setup-cron` | 기존 Python CCVM snapshot cron 제거 | 내부 호환/정리 작업. 자동 snapshot은 API 내부 Go scheduler가 수행 |
 | `config` | PCS cluster 구성 | `cluster`, `hosts` |
 | `create` | CCVM resource 생성 | `resource`, `xml` |
 | `enable` | CCVM resource enable | `resource` |
@@ -1398,13 +1442,13 @@ Cloud Center PCS cluster/resource를 제어한다.
 | `ccvm-status` | libvirt에 CCVM domain 생성 여부 확인 | 없음 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/pcs/control \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/pcs/control \
   -H "Content-Type: application/json" \
   -d '{"action":"status"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/pcs/control \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/pcs/control \
   -H "Content-Type: application/json" \
   -d '{"action":"move","target":"ablecube31-2"}'
 ```
@@ -1416,7 +1460,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/pcs/control \
 Glue cluster 상세 상태를 조회한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/gluecluster/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/gluecluster/status
 ```
 
 ### `POST /cube/gluecluster/update`
@@ -1424,23 +1468,26 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/gluecluster/status
 유지보수 모드를 설정하거나 해제한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/gluecluster/update \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/gluecluster/update \
   -H "Content-Type: application/json" \
   -d '{"action":"set_noout"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/gluecluster/update \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/gluecluster/update \
   -H "Content-Type: application/json" \
   -d '{"action":"unset_noout"}'
 ```
 
 ### `GET /cube/gfs/resource/status`
 
-`pcs status xml` 기반으로 GFS 관련 PCS 리소스 상태를 조회한다.
+`pcs status xml` 기반으로 펜스 장치, `glue-dlm`/`glue-lvmlockd` 잠금 장치와
+`glue-gfs_res` LVM 활성화, `glue-gfs` GFS2 Filesystem clone의 노드별 상태를 조회한다.
+GFS2 마운트 리소스는 `val.resources.gfs_mount_resources`에 반환하며,
+기존 `glue_gfs_resources` 필드도 호환 목적으로 같은 값을 반환한다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/gfs/resource/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/gfs/resource/status
 ```
 
 ### `GET /cube/gfs/disk/status`
@@ -1448,7 +1495,7 @@ curl -sS http://<ablecube-ip>:8090/api/v1/cube/gfs/resource/status
 GFS2로 마운트된 디스크 목록과 multipath/single mode 정보를 조회한다. `blockdevices[]`에는 기존 `size`와 함께 `df -hP` 기준 `used`, `avail`, `use_percent`가 포함된다.
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/cube/gfs/disk/status
+curl -sS http://<ablecube-ip>:18090/api/v1/cube/gfs/disk/status
 ```
 
 ## DB Dump API
@@ -1466,13 +1513,13 @@ CCVM의 `cloud` DB dump와 백업/삭제 스케줄을 관리한다.
 | `deactiveBackup` | 백업/삭제 스케줄 비활성화 | `checkOption` |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/db/dump \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/db/dump \
   -H "Content-Type: application/json" \
   -d '{"action":"instantBackup","path":"/home/db_backup"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/db/dump \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/db/dump \
   -H "Content-Type: application/json" \
   -d '{"action":"regularBackup","path":"/home/db_backup","repeat":"daily","timeone":"02:00"}'
 ```
@@ -1502,7 +1549,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/db/dump \
 등록된 라이선스가 없거나 만료되면 다른 운영 API는 `active license required` 오류로 차단된다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/license \
   -H "Content-Type: application/json" \
   -d '{"action":"status"}'
 ```
@@ -1511,7 +1558,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
 업로드한 파일명이 저장 파일명으로 사용된다. Swagger에서는 `action`에 `register`를 입력하고, `license_file` 파일 선택에서 로컬 라이선스 파일을 선택한다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/license \
   -F "action=register" \
   -F "license_file=@./license.lic"
 ```
@@ -1519,7 +1566,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
 기존 JSON 방식도 호환된다.
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/license \
   -H "Content-Type: application/json" \
   -d '{"action":"register","license_content":"BASE64_CONTENT"}'
 ```
@@ -1542,7 +1589,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/license \
 요청 body 없이 호출하면 마스터 노드에 현재 등록된 라이선스 파일을 읽어 전체 물리 host에 등록한다.
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -1551,7 +1598,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 대상 role을 지정할 수 있다. `roles`는 `ablecube`, `scvm`, `ccvm`, `all`을 지원한다. 명시하지 않으면 `ablecube`만 적용한다.
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1563,7 +1610,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 요청 body로 동일 라이선스를 직접 전달할 수도 있다.
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1576,7 +1623,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 호스트별 라이선스가 다른 경우 `licenses`에 `hostname`, role 이름, target IP, `index`, `scvmN` 중 하나를 key로 지정한다. CCVM은 `ccvm`, SCVM은 `scvm1`, `scvm2` 같은 key를 사용할 수 있다.
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1593,7 +1640,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 특정 target만 지정할 수도 있다.
 
 ```bash
-curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
+curl -X POST http://<master-ablecube-ip>:18090/api/v1/cube/license/apply \
   -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1633,7 +1680,7 @@ curl -X POST http://<master-ablecube-ip>:8090/api/v1/cube/license/apply \
 `cluster.json`의 `clusterConfig.type`이 `ablestack-hci` 또는 `ablestack-hci-filesystem`이면 `glue version` 결과를 `glue_version`으로 포함한다.
 
 ```bash
-curl http://<ablecube-ip>:8090/api/v1/version \
+curl http://<ablecube-ip>:18090/api/v1/version \
   -H "Authorization: Bearer <access_token>"
 ```
 
@@ -1670,13 +1717,13 @@ curl http://<ablecube-ip>:8090/api/v1/version \
 | `mold` | `update-mold.sh` | Mold 업데이트. host와 CCVM 대상 후처리는 스크립트가 담당 |
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/version/update \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/version/update \
   -H "Content-Type: application/json" \
   -d '{"action":"info","mount_path":"/mnt/ablestack-iso","update_type":"all"}'
 ```
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/version/update \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/version/update \
   -H "Content-Type: application/json" \
   -d '{"action":"run","mount_path":"/mnt/ablestack-iso","update_type":"mold"}'
 ```
@@ -1696,7 +1743,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/version/update \
 기본 실행:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/security/patch \
   -H "Content-Type: application/json" \
   -d '{"targets":["all"],"ssh_user":"root","ssh_port":22}'
 ```
@@ -1704,7 +1751,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
 SSH 포트 변경:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/security/patch \
   -H "Content-Type: application/json" \
   -d '{"port_change":true,"new_port":10022,"targets":["all"],"ssh_user":"root","ssh_port":22}'
 ```
@@ -1712,7 +1759,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
 Ceph SSH 설정 변경:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/security/patch \
   -H "Content-Type: application/json" \
   -d '{"ceph_ssh_change":true,"new_port":10022}'
 ```
@@ -1720,7 +1767,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
 추가 호스트용 실행:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/security/patch \
   -H "Content-Type: application/json" \
   -d '{"add_host":true,"new_port":10022,"ssh_user":"root","ssh_port":22}'
 ```
@@ -1728,7 +1775,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
 JSON status 업데이트:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/security/patch \
   -H "Content-Type: application/json" \
   -d '{"update_json_file":true,"local":false}'
 ```
@@ -1742,7 +1789,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/security/patch \
 키 생성:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ssh/key \
   -H "Content-Type: application/json" \
   -d '{"action":"generate"}'
 ```
@@ -1750,7 +1797,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
 Windows PC로 암호화 파일 다운로드:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ssh/key \
   -H "Content-Type: application/json" \
   -d '{"action":"download"}' \
   -OJ
@@ -1759,7 +1806,7 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
 다운로드한 암호화 파일 업로드:
 
 ```bash
-curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
+curl -X POST http://<ablecube-ip>:18090/api/v1/cube/ssh/key \
   -F action=upload \
   -F file=@<downloaded-file>.dat
 ```
@@ -1773,8 +1820,8 @@ curl -X POST http://<ablecube-ip>:8090/api/v1/cube/ssh/key \
 ### Error Log
 
 ```bash
-curl -sS http://<ablecube-ip>:8090/api/v1/err
-curl -X DELETE http://<ablecube-ip>:8090/api/v1/err
+curl -sS http://<ablecube-ip>:18090/api/v1/err
+curl -X DELETE http://<ablecube-ip>:18090/api/v1/err
 ```
 
 ## Background Jobs

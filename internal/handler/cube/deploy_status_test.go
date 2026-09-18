@@ -104,6 +104,112 @@ func TestDeployCloudClusterStatusFromPCSResponse(t *testing.T) {
 	}
 }
 
+func TestBuildDeployPollingPolicy(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           DeployStatusData
+		storageVM      bool
+		storageCluster bool
+		gfs            bool
+		cloudVM        bool
+		cloudCluster   bool
+		mold           bool
+	}{
+		{
+			name: "cluster configuration blocks all polling",
+			data: DeployStatusData{
+				OSType: "ablestack-hci",
+				Raw:    DeployStatusRaw{CCFGStatus: CubeModel.DeployStatusFalse},
+			},
+		},
+		{
+			name: "hci enables storage VM polling after storage VM is running",
+			data: DeployStatusData{
+				OSType: "ablestack-hci",
+				Raw: DeployStatusRaw{
+					CCFGStatus: CubeModel.DeployStatusTrue,
+					SCVMStatus: CubeModel.DeployRuntimeRunning,
+				},
+			},
+			storageVM: true,
+		},
+		{
+			name: "hci enables storage cluster polling after storage VM bootstrap",
+			data: DeployStatusData{
+				OSType: "ablestack-hci",
+				Raw: DeployStatusRaw{
+					CCFGStatus:          CubeModel.DeployStatusTrue,
+					SCVMBootstrapStatus: CubeModel.DeployStatusTrue,
+				},
+			},
+			storageVM:      true,
+			storageCluster: true,
+		},
+		{
+			name: "vm enables cloud cluster polling after gfs configuration",
+			data: DeployStatusData{
+				OSType: "ablestack-vm",
+				Raw: DeployStatusRaw{
+					CCFGStatus:   CubeModel.DeployStatusTrue,
+					GFSConfigure: CubeModel.DeployStatusTrue,
+				},
+			},
+			gfs:          true,
+			cloudCluster: true,
+		},
+		{
+			name: "vm enables cloud VM polling after cloud VM is running",
+			data: DeployStatusData{
+				OSType: "ablestack-vm",
+				Raw: DeployStatusRaw{
+					CCFGStatus: CubeModel.DeployStatusTrue,
+					CCVMStatus: CubeModel.DeployRuntimeRunning,
+				},
+			},
+			cloudVM: true,
+		},
+		{
+			name: "hci enables cloud polling after cloud VM is running",
+			data: DeployStatusData{
+				OSType: "ablestack-hci",
+				Raw: DeployStatusRaw{
+					CCFGStatus: CubeModel.DeployStatusTrue,
+					CCVMStatus: CubeModel.DeployRuntimeRunning,
+				},
+			},
+			cloudVM:      true,
+			cloudCluster: true,
+		},
+		{
+			name: "cloud bootstrap enables cloud VM and mold",
+			data: DeployStatusData{
+				OSType: "ablestack-vm",
+				Raw: DeployStatusRaw{
+					CCFGStatus:          CubeModel.DeployStatusTrue,
+					CCVMBootstrapStatus: CubeModel.DeployStatusTrue,
+				},
+			},
+			cloudVM: true,
+			mold:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildDeployPollingPolicy(tt.data)
+			if got.StorageVM.Enabled != tt.storageVM ||
+				got.StorageCluster.Enabled != tt.storageCluster ||
+				got.GFSResource.Enabled != tt.gfs ||
+				got.GFSDisk.Enabled != tt.gfs ||
+				got.CloudVM.Enabled != tt.cloudVM ||
+				got.CloudCluster.Enabled != tt.cloudCluster ||
+				got.Mold.Enabled != tt.mold {
+				t.Fatalf("unexpected polling policy: %+v", got)
+			}
+		})
+	}
+}
+
 func deployStatusTestConfig(osType string, withPCS bool) CubeModel.ClusterConfigSection {
 	cfg := CubeModel.ClusterConfigSection{
 		Type: osType,

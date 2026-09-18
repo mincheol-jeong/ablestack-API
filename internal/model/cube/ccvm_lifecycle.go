@@ -3,7 +3,7 @@ package cube
 // CCVMLifecycleRequest는 Cloud Center VM lifecycle 요청 본문이다.
 // @name CCVMLifecycleRequest
 type CCVMLifecycleRequest struct {
-	// action: setup/reset/copy/start/stop/restart/delete
+	// action: initialize/setup/reset/copy/start/stop/restart/delete
 	Action string `json:"action" example:"reset"`
 	// optional GFS disk path override for reset action
 	Disk string `json:"disk,omitempty" example:"/dev/sdb"`

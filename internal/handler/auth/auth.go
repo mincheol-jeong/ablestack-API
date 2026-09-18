@@ -375,6 +375,6 @@ func applyInternalTokenToTarget(target string, oldToken string, newToken string)
 
 func buildTargetURL(target string) string {
 	scheme := firstNonEmpty(os.Getenv("ABLESTACK_API_SCHEME"), "http")
-	port := firstNonEmpty(os.Getenv("ABLESTACK_API_PORT"), "8090")
+	port := firstNonEmpty(os.Getenv("ABLESTACK_API_PORT"), "18090")
 	return fmt.Sprintf("%s://%s:%s", scheme, strings.TrimSpace(target), port)
 }

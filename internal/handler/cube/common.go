@@ -177,11 +177,16 @@ func buildTargetURL(target string) string {
 	if scheme == "" {
 		scheme = "http"
 	}
-	port := os.Getenv("ABLESTACK_API_PORT")
-	if port == "" {
-		port = "8090"
-	}
+	port := configuredAPIPort()
 	return fmt.Sprintf("%s://%s:%s", scheme, target, port)
+}
+
+func configuredAPIPort() string {
+	port := strings.TrimSpace(os.Getenv("ABLESTACK_API_PORT"))
+	if port == "" {
+		return "18090"
+	}
+	return port
 }
 
 // attachInternalToken은 호스트 간 내부 API 호출에 공유 내부 토큰을 추가한다.
@@ -295,7 +300,11 @@ func scheduleSSHKnownHostsScanForHosts(hosts []string) {
 	go func(pending []string) {
 		delay := sshScanInitialDelay
 		scannedSet := map[string]struct{}{}
-		time.Sleep(delay)
+		if removed, err := repairDefaultKnownHostsFile(); err != nil {
+			log.Printf("ssh-scan initial known_hosts repair failed: err=%v", err)
+		} else if removed > 0 {
+			log.Printf("ssh-scan initial known_hosts repair completed: removed_invalid_lines=%d", removed)
+		}
 		remaining := pending
 		for attempt := 1; attempt <= sshScanMaxAttempts; attempt++ {
 			result, err := scanAndUpdateKnownHostsForHosts(remaining, port)
@@ -350,13 +359,13 @@ func scheduleSSHKnownHostsScanForHosts(hosts []string) {
 				log.Printf("ssh-scan attempt failed: attempt=%d err=%v", attempt, err)
 			}
 			remaining = result.Remaining
+			time.Sleep(delay)
 			if delay < sshScanMaxDelay {
 				delay *= 2
 				if delay > sshScanMaxDelay {
 					delay = sshScanMaxDelay
 				}
 			}
-			time.Sleep(delay)
 		}
 	}(targets)
 }

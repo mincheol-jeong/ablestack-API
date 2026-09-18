@@ -42,6 +42,15 @@ definitions:
         example: Not Found
         type: string
     type: object
+  HTTP409Conflict:
+    properties:
+      err_code:
+        example: 409
+        type: integer
+      message:
+        example: Conflict
+        type: string
+    type: object
   HTTP500InternalServerError:
     properties:
       err_code:
@@ -216,6 +225,10 @@ definitions:
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.BootstrapRequest:
     properties:
+      join_existing_cluster:
+        description: 기존 Ceph 클러스터에 대상 SCVM만 추가한다. 초기 Ceph bootstrap은 실행하지 않는다.
+        example: true
+        type: boolean
       license_content:
         description: 라이선스 파일 내용(base64). 비어 있으면 현재 로컬 라이선스를 재사용한다.
         example: BASE64_CONTENT
@@ -230,8 +243,8 @@ definitions:
         description: hostname, role, target IP, index, scvmN 이름별 라이선스 내용.
         type: object
       run_script:
-        description: VM API health/license 단계 전에 host qemu-guest-agent로 /root/bootstrap.sh를
-          실행할지 여부.
+        description: VM API health/license 단계 전에 /root/bootstrap.sh를 실행할지 여부. SCVM은
+          host QGA, CCVM은 CCVM API 로컬 실행을 사용한다.
         example: true
         type: boolean
       target_hostnames:
@@ -267,9 +280,16 @@ definitions:
         items:
           $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.BootstrapScriptResult'
         type: array
+      system_profile:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterApplyResult'
+        type: array
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.BootstrapScriptResult:
     properties:
+      action:
+        example: prepare
+        type: string
       code:
         example: 200
         type: integer
@@ -369,6 +389,42 @@ definitions:
         example: 16
         type: integer
     type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateRequest:
+    properties:
+      cpu:
+        description: vCPU 개수
+        example: 4
+        type: integer
+      gfs_mount_point:
+        description: GFS mount point. ablestack-vm에서 ccvm.qcow2 경로 계산에 사용한다.
+        example: /mnt/glue-gfs
+        type: string
+      management_network_bridge:
+        description: management network bridge
+        example: br0
+        type: string
+      memory:
+        description: 메모리 크기(GiB)
+        example: 16
+        type: integer
+      service_network_bridge:
+        description: optional service network bridge
+        example: br1
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      message:
+        example: ccvm create success
+        type: string
+      setup:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMPCSControlResponse'
+      xml:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMXMLCreateResponse'
+    type: object
   ablecloud_io_ablestack-api_internal_model_cube.CCVMEditRequest:
     properties:
       cpu:
@@ -418,7 +474,7 @@ definitions:
   ablecloud_io_ablestack-api_internal_model_cube.CCVMLifecycleRequest:
     properties:
       action:
-        description: 'action: setup/reset/copy/start/stop/restart/delete'
+        description: 'action: initialize/setup/reset/copy/start/stop/restart/delete'
         example: reset
         type: string
       destroy:
@@ -457,6 +513,111 @@ definitions:
         type: string
       val:
         example: cloud center reset success
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest:
+    properties:
+      action:
+        enum:
+        - configure
+        - update
+        example: configure
+        type: string
+      ccvm:
+        example:
+        - 10.10.31.10
+        items:
+          type: string
+        type: array
+      cube:
+        example:
+        - 10.10.31.1
+        - 10.10.31.2
+        items:
+          type: string
+        type: array
+      scvm:
+        example:
+        - 10.10.31.11
+        - 10.10.31.12
+        items:
+          type: string
+        type: array
+      smtp:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringSMTPConfig'
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigResponse:
+    properties:
+      action:
+        example: configure
+        type: string
+      code:
+        example: 200
+        type: integer
+      message:
+        example: monitoring configuration success
+        type: string
+      services:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringServiceStatus'
+        type: array
+      steps:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigStep'
+        type: array
+      system_profile:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterApplyResult'
+        type: array
+      val:
+        example: ok
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigStep:
+    properties:
+      code:
+        example: 200
+        type: integer
+      message:
+        example: success wall configuration
+        type: string
+      name:
+        example: configure_wall
+        type: string
+      output:
+        type: string
+      status:
+        example: succeeded
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringSMTPConfig:
+    properties:
+      enabled:
+        example: true
+        type: boolean
+      host:
+        example: 10.10.31.20
+        type: string
+      password:
+        example: password
+        type: string
+      port:
+        example: 25
+        type: integer
+      user:
+        example: admin@example.com
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringServiceStatus:
+    properties:
+      active:
+        example: true
+        type: boolean
+      enabled:
+        example: true
+        type: boolean
+      name:
+        example: prometheus
         type: string
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.CCVMPCSControlRequest:
@@ -917,6 +1078,14 @@ definitions:
         description: external timeserver
         example: time.google.com
         type: string
+      gfs:
+        allOf:
+        - $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.ClusterGFSConfig'
+        description: GFS2 filesystem format settings
+      hostType:
+        description: 'latest cluster host operation: new/add'
+        example: add
+        type: string
       hosts:
         description: host list
         items:
@@ -938,6 +1107,27 @@ definitions:
         description: cluster type
         example: ablestack-vm
         type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.ClusterGFSConfig:
+    properties:
+      journal_size_description:
+        description: Human-readable journal size constraint stored with cluster.json.
+        example: MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 8MB~1024MB입니다.
+        type: string
+      journal_size_mb:
+        description: GFS2 journal size in MB. Must be a power of two between 8 and
+          1024.
+        example: 512
+        type: integer
+      resource_group_size_description:
+        description: Human-readable resource group size constraint stored with cluster.json.
+        example: MB 단위. 2의 거듭제곱 값으로 설정하며 허용 범위는 32MB~2048MB입니다.
+        type: string
+      resource_group_size_mb:
+        description: GFS2 resource group size in MB. Must be a power of two between
+          32 and 2048.
+        example: 1024
+        type: integer
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.ClusterHealthResponse:
     properties:
@@ -1123,6 +1313,32 @@ definitions:
         type: string
       val: {}
     type: object
+  ablecloud_io_ablestack-api_internal_model_cube.DeployPollingPolicy:
+    properties:
+      cloud_cluster:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      cloud_vm:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      gfs_disk:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      gfs_resource:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      mold:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      storage_cluster:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+      storage_vm:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget'
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.DeployPollingTarget:
+    properties:
+      enabled:
+        example: true
+        type: boolean
+      reason:
+        example: cloud center VM is running
+        type: string
+    type: object
   ablecloud_io_ablestack-api_internal_model_cube.DeployRunJob:
     properties:
       created_at:
@@ -1207,6 +1423,10 @@ definitions:
         allOf:
         - $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.GFSManageRequest'
         description: GFS/PCS storage request for VM/HCI filesystem flows.
+      join_existing_scvm_cluster:
+        description: 신규 SCVM을 기존 Ceph 클러스터에 조인한다. 초기 Ceph bootstrap은 실행하지 않는다.
+        example: true
+        type: boolean
       license_content:
         description: license file content (base64). If empty, current local license
           is reused by license_apply.
@@ -1230,16 +1450,28 @@ definitions:
         description: 'mode: all/partial. all is the default.'
         example: all
         type: string
+      monitoring:
+        allOf:
+        - $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest'
+        description: CCVM Wall monitoring configuration. action defaults to configure
+          in deploy/run.
       only:
         description: run only these steps.
         example:
         - license_apply
         - cluster_apply
         - scvm_bootstrap
+        - rbd_prepare
+        - storage_prepare
         - ccvm_bootstrap
         items:
           type: string
         type: array
+      rbd:
+        allOf:
+        - $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.RBDManageRequest'
+        description: RBD image creation and host rbdmap request for HCI filesystem
+          flows.
       run_bootstrap_script:
         description: scvm_bootstrap/ccvm_bootstrap 단계에서 VM 내부 /root/bootstrap.sh를
           실행할지 여부. 기본값은 true.
@@ -1255,6 +1487,13 @@ definitions:
         description: skip these steps.
         example:
         - local_prepare
+        items:
+          type: string
+        type: array
+      target_hostnames:
+        description: SCVM 준비/bootstrap 대상을 cluster.json hosts[].hostname으로 제한한다.
+        example:
+        - ablecube31-4
         items:
           type: string
         type: array
@@ -1320,6 +1559,8 @@ definitions:
       os_type:
         example: ablestack-hci
         type: string
+      polling:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployPollingPolicy'
       raw:
         $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.DeployStatusRaw'
       severity:
@@ -1407,6 +1648,10 @@ definitions:
         type: string
       id:
         type: string
+      in_use:
+        type: boolean
+      in_use_reason:
+        type: string
       kname:
         type: string
       model:
@@ -1416,6 +1661,8 @@ definitions:
       name:
         type: string
       path:
+        type: string
+      path_mode:
         type: string
       pkname:
         description: 내부 트리 재구성에만 쓰고, 최종 응답에서는 제거합니다.
@@ -1438,6 +1685,8 @@ definitions:
         type: string
       type:
         type: string
+      uuid:
+        type: string
       vendor:
         type: string
       wwn:
@@ -1453,8 +1702,20 @@ definitions:
   ablecloud_io_ablestack-api_internal_model_cube.GFSManageRequest:
     properties:
       action:
-        description: 'action: init-pcs-cluster/modify-lvm-conf/partprobe/lvmdevices-add/resource-cleanup/check-host/check-stonith/check-ipmi/set-alert/list-gfs/delete-gfs/rescan/extend/scan/add-extend'
+        description: 'action: init-pcs-cluster/create-gfs/modify-lvm-conf/set-cluster-password/partprobe/lvmdevices-add/resource-cleanup/check-host/configure-stonith/check-stonith/check-ipmi/set-alert/list-gfs/delete-gfs/rescan/extend/scan/add-extend'
         example: init-pcs-cluster
+        type: string
+      cluster_name:
+        description: PCS cluster name. init-pcs-cluster defaults to cloudcenter_cluster.
+        example: cloudcenter_cluster
+        type: string
+      cluster_password:
+        description: PCS authentication password. init-pcs-cluster defaults to password.
+        example: password
+        type: string
+      cluster_user:
+        description: PCS authentication user. init-pcs-cluster defaults to hacluster.
+        example: hacluster
         type: string
       control:
         description: 'check-stonith control: check/enable/disable/security-disable/security-enable'
@@ -1530,6 +1791,12 @@ definitions:
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.GFSManageStonithDevice:
     properties:
+      host:
+        example: 10.10.31.1
+        type: string
+      hostname:
+        example: ablecube31-1
+        type: string
       ipaddr:
         example: 192.168.0.10
         type: string
@@ -1553,6 +1820,9 @@ definitions:
         type: string
       message:
         example: ok
+        type: string
+      step:
+        example: modify_lvm_conf
         type: string
       target:
         example: 10.10.31.1
@@ -1752,6 +2022,99 @@ definitions:
           type: string
         type: array
     type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob:
+    properties:
+      cluster_type:
+        type: string
+      created_at:
+        type: string
+      current_step:
+        type: string
+      finished_at:
+        type: string
+      hostname:
+        type: string
+      job_id:
+        type: string
+      message:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep'
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobListResponse:
+    properties:
+      code:
+        type: integer
+      jobs:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob'
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobResponse:
+    properties:
+      code:
+        type: integer
+      job:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJob'
+      message:
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveRequest:
+    properties:
+      domain:
+        example: /
+        type: string
+      force:
+        example: false
+        type: boolean
+      hostname:
+        example: ablecube31-4
+        type: string
+      password:
+        example: password
+        type: string
+      username:
+        description: CloudStack 관리자 계정. 비어 있으면 admin/password, domain=/ 기본값을 사용한다.
+        example: admin
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStartResponse:
+    properties:
+      code:
+        type: integer
+      job_id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep'
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStep:
+    properties:
+      duration_ms:
+        type: integer
+      finished_at:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      output: {}
+      started_at:
+        type: string
+      status:
+        type: string
+    type: object
   ablecloud_io_ablestack-api_internal_model_cube.HostRoleGroup:
     properties:
       ablecube:
@@ -1815,6 +2178,11 @@ definitions:
         items:
           type: string
         type: array
+      wait_for_ready:
+        description: wait for the CCVM PCS resource or local libvirt domain before
+          registering its license.
+        example: true
+        type: boolean
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.LicenseApplyResponse:
     properties:
@@ -1831,6 +2199,9 @@ definitions:
     type: object
   ablecloud_io_ablestack-api_internal_model_cube.LicenseApplyTargetResult:
     properties:
+      attempts:
+        example: 2
+        type: integer
       code:
         example: 200
         type: integer
@@ -2340,6 +2711,141 @@ definitions:
         type: string
       val: {}
     type: object
+  ablecloud_io_ablestack-api_internal_model_cube.SSHTrustRequest:
+    properties:
+      action:
+        description: 'action: ensure/status/remove'
+        example: ensure
+        type: string
+      identifier:
+        description: authorized_keys comment used as the stable registration identifier.
+        example: cloud@ccvm
+        type: string
+      public_key:
+        description: OpenSSH public key. Required for ensure.
+        example: ecdsa-sha2-nistp256 AAAA... cloud@ccvm
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.SSHTrustResponse:
+    properties:
+      action:
+        example: ensure
+        type: string
+      changed:
+        type: boolean
+      code:
+        example: 200
+        type: integer
+      fingerprint:
+        example: SHA256:...
+        type: string
+      identifier:
+        example: cloud@ccvm
+        type: string
+      message:
+        example: ssh trust key ensured
+        type: string
+      present:
+        type: boolean
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceMetadata:
+    properties:
+      clusterType:
+        example: ablestack-hci
+        type: string
+      collectedHosts:
+        items:
+          type: string
+        type: array
+      collectorStatus:
+        type: integer
+      collectorWarning:
+        type: string
+      downloadAvailable:
+        type: boolean
+      filename:
+        example: ABLESTACK 보안 취약점 증적 자료.zip
+        type: string
+      generatedAt:
+        example: "2026-07-27T10:30:00+09:00"
+        type: string
+      hosts:
+        example: 3
+        type: integer
+      items:
+        example: 67
+        type: integer
+      path:
+        type: string
+      requestedHosts:
+        example: 3
+        type: integer
+      requestedTargets:
+        items:
+          type: string
+        type: array
+      runDirectory:
+        type: string
+      size:
+        example: 1048576
+        type: integer
+      slides:
+        example: 68
+        type: integer
+      targetGroups:
+        items:
+          type: string
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceRequest:
+    properties:
+      hosts:
+        description: cluster.json 대신 명시적으로 수집할 hostname/IP 목록
+        example:
+        - ablecube1
+        - scvm1
+        items:
+          type: string
+        type: array
+      items:
+        description: '점검 항목: all, U-01,U-02 또는 U-01:U-13'
+        example: all
+        type: string
+      max_output_lines:
+        description: 명령별 최대 출력 행 수
+        example: 400
+        type: integer
+      ssh_port:
+        description: SSH 포트. 0이면 로컬 sshd 설정에서 자동 감지한다.
+        example: 22
+        type: integer
+      ssh_user:
+        description: SSH 사용자
+        example: root
+        type: string
+      targets:
+        description: '대상 그룹: all/ablecube/scvm/ccvm'
+        example:
+        - all
+        items:
+          type: string
+        type: array
+      timeout:
+        description: 호스트별 명령 제한 시간(초)
+        example: 120
+        type: integer
+    type: object
+  ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      message:
+        example: ok
+        type: string
+      val:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceMetadata'
+    type: object
   ablecloud_io_ablestack-api_internal_model_cube.SecurityPatchRequest:
     properties:
       add_host:
@@ -2359,7 +2865,7 @@ definitions:
         example: /etc/ablestack/properties/cluster.json
         type: string
       local:
-        description: update_json_file 사용 시 현재 호스트에서만 JSON을 업데이트한다.
+        description: 내부 fan-out 요청에서 현재 노드만 실행한다. update_json_file에도 동일하게 적용된다.
         example: false
         type: boolean
       new_port:
@@ -2408,7 +2914,7 @@ definitions:
   ablecloud_io_ablestack-api_internal_model_cube.SystemConfigRequest:
     properties:
       action:
-        description: 'action: status/update/allUpdate/reset'
+        description: 'action: status/update/allUpdate/reset/gfs-configure'
         example: status
         type: string
       depth1:
@@ -3094,6 +3600,396 @@ definitions:
         example: restart
         type: string
     type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapError:
+    properties:
+      code:
+        example: 431
+        type: integer
+      command:
+        example: createZone
+        type: string
+      endpoint:
+        example: http://10.10.254.236:8080/client/api
+        type: string
+      error_code:
+        example: "431"
+        type: string
+      error_text:
+        example: unable to create zone
+        type: string
+      http_body:
+        type: string
+      http_status:
+        example: 401
+        type: integer
+      message:
+        example: mold api error response
+        type: string
+      method:
+        example: POST
+        type: string
+      raw: {}
+      sessionkey_attached:
+        example: true
+        type: boolean
+      step:
+        example: create_zone
+        type: string
+      verify_command:
+        example: listZones
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob:
+    properties:
+      created_at:
+        type: string
+      current_step:
+        example: create_zone
+        type: string
+      error:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError'
+      finished_at:
+        type: string
+      job_id:
+        example: 018f9c39-7ca9-7f4e-9a04-f6373d8f7e2b
+        type: string
+      message:
+        example: ok
+        type: string
+      resources:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapResourceResults'
+      started_at:
+        type: string
+      status:
+        example: running
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep'
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobListResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      jobs:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob'
+        type: array
+      message:
+        example: ok
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobResponse:
+    properties:
+      code:
+        example: 200
+        type: integer
+      job:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJob'
+      message:
+        example: ok
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep:
+    properties:
+      command:
+        example: createZone
+        type: string
+      duration_ms:
+        example: 1200
+        type: integer
+      error:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError'
+      finished_at:
+        type: string
+      message:
+        example: ok
+        type: string
+      name:
+        example: create_zone
+        type: string
+      result:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapStepResult'
+      result_key:
+        example: zone
+        type: string
+      started_at:
+        type: string
+      status:
+        example: running
+        type: string
+      verify_command:
+        example: listZones
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest:
+    properties:
+      auth:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest'
+      cluster:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ClusterRequest'
+      physical_network:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PhysicalNetworkRequest'
+      pod:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PodRequest'
+      public_ip:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.PublicIPRangeRequest'
+      secondary_staging_store:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.SecondaryStagingStoreRequest'
+      zone:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ZoneRequest'
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapResourceResults:
+    properties:
+      cluster:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      hosts:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+        type: array
+      network_providers:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+        type: array
+      physical_network:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      pod:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      primary_storage:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      public_ip_range:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      secondary_staging_store:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      secondary_storage:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      system_vms:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+        type: array
+      traffic_types:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+        type: array
+      zone:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapStartResponse:
+    properties:
+      code:
+        example: 202
+        type: integer
+      job_id:
+        example: 018f9c39-7ca9-7f4e-9a04-f6373d8f7e2b
+        type: string
+      message:
+        example: mold bootstrap job started
+        type: string
+      status:
+        example: queued
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobStep'
+        type: array
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.BootstrapStepResult:
+    properties:
+      command:
+        example: createZone
+        type: string
+      created:
+        type: boolean
+      error:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapError'
+      existing:
+        type: boolean
+      name:
+        example: create_zone
+        type: string
+      raw_response: {}
+      resource:
+        $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+      resources:
+        items:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.ResourceResult'
+        type: array
+      result_key:
+        example: zone
+        type: string
+      status:
+        example: succeeded
+        type: string
+      verified:
+        type: boolean
+      verified_by:
+        example: listZones
+        type: string
+      verify_command:
+        example: listZones
+        type: string
+      verify_response: {}
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.ClusterRequest:
+    properties:
+      arch:
+        example: x86_64
+        type: string
+      clustertype:
+        example: CloudManaged
+        type: string
+      hypervisor:
+        example: KVM
+        type: string
+      name:
+        example: Cluster
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest:
+    properties:
+      domain:
+        example: /
+        type: string
+      password:
+        example: password
+        type: string
+      response:
+        example: json
+        type: string
+      username:
+        example: admin
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.PhysicalNetworkRequest:
+    properties:
+      broadcastdomainrange:
+        example: Zone
+        type: string
+      isolationmethods:
+        example: VLAN
+        type: string
+      name:
+        example: Physicalnetwork
+        type: string
+      networkspeed:
+        example: 10G
+        type: string
+      tags:
+        example: guest
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.PodRequest:
+    properties:
+      endip:
+        example: 10.10.31.150
+        type: string
+      gateway:
+        example: 10.10.31.1
+        type: string
+      name:
+        example: Pod
+        type: string
+      netmask:
+        example: 255.255.255.0
+        type: string
+      startip:
+        example: 10.10.31.100
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.PublicIPRangeRequest:
+    properties:
+      endip:
+        example: 10.10.20.150
+        type: string
+      gateway:
+        example: 10.10.20.1
+        type: string
+      netmask:
+        example: 255.255.255.0
+        type: string
+      startip:
+        example: 10.10.20.100
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.ResourceResult:
+    properties:
+      id:
+        example: 2f6b0c0e-0000-0000-0000-000000000001
+        type: string
+      name:
+        example: zone-1
+        type: string
+      raw: {}
+      state:
+        example: Enabled
+        type: string
+      status:
+        example: Up
+        type: string
+      url:
+        example: nfs://10.10.31.20/export/secondary
+        type: string
+      verified_by:
+        example: listZones
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.Response:
+    properties:
+      code:
+        example: 200
+        type: integer
+      message:
+        example: ok
+        type: string
+      val: {}
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.SecondaryStagingStoreRequest:
+    properties:
+      provider:
+        example: NFS
+        type: string
+      scope:
+        example: zone
+        type: string
+      url:
+        example: nfs://10.10.31.20/export/staging
+        type: string
+    type: object
+  ablecloud_io_ablestack-api_internal_model_mold.ZoneRequest:
+    properties:
+      dns1:
+        example: 8.8.8.8
+        type: string
+      dns2:
+        example: 1.1.1.1
+        type: string
+      domain:
+        example: local
+        type: string
+      guestcidraddress:
+        example: 10.1.1.0/24
+        type: string
+      internaldns1:
+        example: 10.10.0.1
+        type: string
+      internaldns2:
+        example: 10.10.0.2
+        type: string
+      localstorageenabled:
+        example: "false"
+        type: string
+      name:
+        example: Zone
+        type: string
+      networktype:
+        example: Advanced
+        type: string
+      securitygroupenabled:
+        example: "false"
+        type: string
+    type: object
   ablecloud_io_ablestack-api_internal_service_authservice.TokenClaim:
     properties:
       exp:
@@ -3389,9 +4285,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: CCVM의 /root/bootstrap.sh를 host qemu-guest-agent로 실행한 뒤 CCVM API
-        health 확인, 라이선스 등록/status 확인을 수행합니다. deploy_run의 ccvm_bootstrap step도 같은 실행
-        흐름을 사용합니다.
+      description: 내부 API로 Ablecube TPM/PCS 서비스와 HCI SCVM Crushmap을 로컬 준비하고, 라이선스가
+        등록된 CCVM API에서 /root/bootstrap.sh를 실행한 뒤 CCVM API health와 라이선스 status를 확인합니다.
+        deploy_run의 ccvm_bootstrap step도 같은 실행 흐름을 사용합니다.
       parameters:
       - description: ccvm bootstrap request
         in: body
@@ -3414,6 +4310,37 @@ paths:
           schema:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: CCVM Bootstrap
+      tags:
+      - Cube-CCVM
+  /cube/ccvm/create:
+    post:
+      consumes:
+      - application/json
+      description: 제품 타입에 맞는 CCVM XML과 backing image를 준비하고 PCS 리소스를 비활성 상태로 생성합니다.
+        시작은 /cube/ccvm/lifecycle action=start를 사용합니다.
+      parameters:
+      - description: ccvm create request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMCreateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/HTTP400BadRequest'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: Create CCVM
       tags:
       - Cube-CCVM
   /cube/ccvm/edit:
@@ -3450,9 +4377,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: setup, reset,
-        copy, start, stop, restart, delete. standalone setup은 로컬 CCVM을 생성하고, reset은
-        clusterConfig.type에 따라 PCS/GFS/local disk 설정까지 초기화합니다.'
+      description: 'Cloud Center VM lifecycle 작업을 수행합니다. 사용 가능한 action: initialize,
+        setup, reset, copy, start, stop, restart, delete. initialize는 기존 cloudcenter_res와
+        /mnt/glue-gfs/ccvm*만 정리하며, reset은 clusterConfig.type에 따라 PCS/GFS/local disk
+        설정까지 초기화합니다.'
       parameters:
       - description: ccvm lifecycle request
         in: body
@@ -3476,6 +4404,37 @@ paths:
           schema:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: CCVM Lifecycle
+      tags:
+      - Cube-CCVM
+  /cube/ccvm/monitoring/config:
+    post:
+      consumes:
+      - application/json
+      description: configure는 CCVM의 기존 Wall Python 도구로 대상 확인, Netdive, Wall/Prometheus/Grafana/Loki,
+        서비스와 SMTP 구성을 수행하고 API가 실제 서비스 상태와 system profile 반영을 검증합니다. update는 config_wall.py
+        update를 실행하고 서비스 상태를 검증합니다.
+      parameters:
+      - description: monitoring config request
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.CCVMMonitoringConfigResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/HTTP400BadRequest'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: Configure or update CCVM monitoring
       tags:
       - Cube-CCVM
   /cube/ccvm/restore:
@@ -3961,7 +4920,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/스토리지/CCVM 준비 단계를 job으로 순차 실행합니다.
+      description: 기존 개별 API를 보존한 상태에서 라이선스/클러스터/SCVM/RBD/GFS/CCVM/Wall 모니터링 준비 단계를
+        job으로 순차 실행합니다. queued/running job은 동시에 하나만 허용합니다.
       parameters:
       - description: deploy run request
         in: body
@@ -3980,6 +4940,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/HTTP400BadRequest'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/HTTP409Conflict'
       summary: All-in-one Deploy Run
       tags:
       - Cube-Deploy
@@ -4007,8 +4971,8 @@ paths:
     get:
       consumes:
       - application/x-www-form-urlencoded
-      description: Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath/single 분류 목록을
-        반환합니다.
+      description: Cube-Disk의 Disk목록을 보여줍니다. action=detail은 multipath -ll 기준 map 또는
+        OS 영역을 제외한 lsblk 물리 디스크 목록을 반환합니다.
       parameters:
       - description: disk action
         enum:
@@ -4103,7 +5067,8 @@ paths:
     get:
       consumes:
       - application/x-www-form-urlencoded
-      description: pcs status xml 기반 GFS 리소스 상태를 조회합니다.
+      description: pcs status xml 기반 펜싱, 잠금 및 glue-gfs/glue-gfs_res GFS2 마운트 리소스 상태를
+        조회합니다.
       produces:
       - application/json
       responses:
@@ -4242,6 +5207,63 @@ paths:
       summary: Show List of Hosts
       tags:
       - Cube-Hosts
+  /cube/hosts/remove:
+    post:
+      consumes:
+      - application/json
+      description: HCI는 Mold Host, Ceph/SCVM을 제거하고 VM은 Mold Host, PCS/GFS 노드를 제거한
+        뒤 전체 노드 구성과 Wall을 갱신합니다.
+      parameters:
+      - description: host removal request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/HTTP400BadRequest'
+      summary: Start product-aware host removal job
+      tags:
+      - Cube-Cluster
+  /cube/hosts/remove/jobs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobListResponse'
+      summary: List host removal jobs
+      tags:
+      - Cube-Cluster
+  /cube/hosts/remove/jobs/{job_id}:
+    get:
+      parameters:
+      - description: job id
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.HostRemoveJobResponse'
+      summary: Get host removal job
+      tags:
+      - Cube-Cluster
   /cube/license:
     post:
       security: []
@@ -4407,8 +5429,8 @@ paths:
       consumes:
       - application/json
       description: CCVM Pacemaker/PCS setup/config/create/enable/disable/move/cleanup/status/remove/destroy/stop/sync/ccvm-status
-        작업을 수행합니다. setup은 cluster.json의 clusterConfig.pcsCluster 노드에 CCVM 스냅샷 cron을
-        배포한 뒤 cloudcenter_res를 구성합니다.
+        작업을 수행합니다. setup은 clusterConfig.pcsCluster 노드의 기존 Python 스냅샷 cron을 정리한 뒤 cloudcenter_res를
+        구성합니다. 자동 스냅샷은 API 내부 Go 스케줄러가 수행합니다.
       parameters:
       - description: pcs control request
         in: body
@@ -4469,8 +5491,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 대표 SCVM의 /root/bootstrap.sh를 host qemu-guest-agent로 실행한 뒤 SCVM
-        API health 확인, 라이선스 등록/status 확인을 수행합니다. deploy_run의 scvm_bootstrap step도
+      description: 각 host API가 로컬 SCVM을 qemu-guest-agent로 준비한 뒤 첫 번째 SCVM에서 Ceph bootstrap/host
+        등록/검증을 수행하고, SCVM API health와 라이선스를 확인합니다. deploy_run의 scvm_bootstrap step도
         같은 실행 흐름을 사용합니다.
       parameters:
       - description: scvm bootstrap request
@@ -4576,11 +5598,82 @@ paths:
       summary: Create SCVM XML
       tags:
       - Cube-SCVM
+  /cube/security/evidence:
+    get:
+      description: 가장 최근에 생성된 보안 증적 ZIP 메타데이터를 반환합니다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/HTTP404NotFound'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: Latest Security Evidence
+      tags:
+      - Cube-Security
+    post:
+      consumes:
+      - application/json
+      description: cluster.json 대상의 읽기 전용 보안 점검 결과를 수집해 TXT/XLSX/PPTX가 포함된 ZIP 패키지를
+        생성합니다.
+      parameters:
+      - description: security evidence options
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SecurityEvidenceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/HTTP400BadRequest'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: Generate Security Evidence
+      tags:
+      - Cube-Security
+  /cube/security/evidence/download:
+    get:
+      description: 가장 최근에 생성된 보안 증적 ZIP 파일을 다운로드합니다.
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/HTTP404NotFound'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: Download Security Evidence
+      tags:
+      - Cube-Security
   /cube/security/patch:
     post:
       consumes:
       - application/json
-      description: cluster.json 대상에 security_patch.sh를 로컬/SSH로 실행하거나 security_patch.status
+      description: cluster.json 대상 노드 API를 호출해 각 노드가 security_patch.sh를 로컬 실행하거나 security_patch.status
         값을 업데이트합니다.
       parameters:
       - description: security patch request
@@ -4641,6 +5734,37 @@ paths:
           schema:
             $ref: '#/definitions/HTTP500InternalServerError'
       summary: SSH Key Management
+      tags:
+      - Cube-SSH
+  /cube/ssh/trust:
+    post:
+      consumes:
+      - application/json
+      description: /root/.ssh/authorized_keys에서 cloud@ccvm 식별 공개키만 멱등적으로 등록, 조회 또는
+        제거합니다.
+      parameters:
+      - description: ssh trust request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SSHTrustRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_cube.SSHTrustResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/HTTP400BadRequest'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/HTTP500InternalServerError'
+      summary: CloudStack Management SSH Trust
       tags:
       - Cube-SSH
   /cube/system/config:
@@ -7359,6 +8483,216 @@ paths:
       summary: API Health
       tags:
       - Health
+  /mold:
+    get:
+      description: CCVM 전용 Mold API 등록 상태와 현재 노드의 CCVM 판정 결과를 반환합니다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold API 상태
+      tags:
+      - Mold
+  /mold/bootstrap:
+    post:
+      consumes:
+      - application/json
+      description: Mold 인프라 자동화를 비동기 job으로 시작합니다. hosts, primary/secondary storage,
+        VLAN은 cluster.json에서 자동 계산하고 각 단계 결과는 /mold/jobs/{job_id}에서 조회합니다.
+      parameters:
+      - description: Mold bootstrap request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold bootstrap job 시작
+      tags:
+      - Mold
+  /mold/bootstrap/plan:
+    post:
+      consumes:
+      - application/json
+      description: Mold 인프라 자동화 입력값을 검증하고 실행 순서, create command, 검증용 list command,
+        누락 입력값을 반환합니다. hosts, primary/secondary storage, VLAN은 cluster.json의 type/hosts/ccvm.ip에서
+        자동 계산하며 실제 인프라는 생성하지 않습니다.
+      parameters:
+      - description: Mold bootstrap request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold bootstrap plan
+      tags:
+      - Mold
+  /mold/capabilities:
+    get:
+      description: cluster.json의 clusterConfig.ccvm.ip로 Mold 기본 인증값(admin/password,
+        domain=/)으로 login 후 listCapabilities command를 호출합니다. 인증값 override가 필요하면 POST
+        /mold/capabilities를 사용합니다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold capabilities 조회
+      tags:
+      - Mold
+    post:
+      consumes:
+      - application/json
+      - application/x-www-form-urlencoded
+      description: cluster.json의 clusterConfig.ccvm.ip로 Mold login 후 listCapabilities
+        command를 호출합니다. 요청 body/form이 비어 있으면 admin/password, domain=/, response=json
+        기본값을 사용합니다.
+      parameters:
+      - description: Mold login override
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold capabilities 조회
+      tags:
+      - Mold
+  /mold/jobs:
+    get:
+      description: 최근 Mold bootstrap job 목록을 반환합니다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobListResponse'
+      summary: Mold bootstrap job 목록
+      tags:
+      - Mold
+  /mold/jobs/{job_id}:
+    get:
+      description: Mold bootstrap job의 현재 step, 완료 step, 실패 에러, 최종 리소스 결과를 반환합니다.
+      parameters:
+      - description: job id
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.BootstrapJobResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold bootstrap job 조회
+      tags:
+      - Mold
+  /mold/session:
+    post:
+      consumes:
+      - application/json
+      - application/x-www-form-urlencoded
+      description: cluster.json의 clusterConfig.ccvm.ip로 Mold endpoint를 계산한 뒤 login
+        command를 호출해 sessionkey를 반환합니다. 요청 body/form이 비어 있으면 admin/password, domain=/,
+        response=json 기본값을 사용합니다.
+      parameters:
+      - description: Mold login override
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.MoldAuthRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/ablecloud_io_ablestack-api_internal_model_mold.Response'
+      summary: Mold session 생성
+      tags:
+      - Mold
   /version:
     get:
       consumes:

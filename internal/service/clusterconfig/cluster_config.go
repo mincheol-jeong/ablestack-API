@@ -34,6 +34,7 @@ const (
 
 type Args struct {
 	Action             string
+	HostType           string
 	Type               string
 	CCVMMngtIP         string
 	MngtNicCIDR        string
@@ -104,6 +105,7 @@ func ApplyLocal(action string, req CubeModel.ClusterApplyRequest) (CubeModel.Clu
 	}
 	args := Args{
 		Action:             action,
+		HostType:           req.Option,
 		Type:               req.Type,
 		CCVMMngtIP:         req.CCVMMngtIP,
 		MngtNicCIDR:        req.MngtNicCIDR,
@@ -377,13 +379,22 @@ func ensureMap(parent map[string]any, key string) map[string]any {
 
 type orderedClusterConfig struct {
 	Type               string         `json:"type"`
+	HostType           string         `json:"hostType,omitempty"`
 	BackupPath         string         `json:"backup_path"`
 	CCVM               orderedCCVM    `json:"ccvm"`
 	MngtNic            orderedMngtNic `json:"mngtNic"`
 	PCSCluster         map[string]any `json:"pcsCluster"`
+	GFS                orderedGFS     `json:"gfs"`
 	Hosts              []any          `json:"hosts"`
 	ExternalTimeserver string         `json:"external_timeserver"`
 	StorageNetwork     string         `json:"storage_network"`
+}
+
+type orderedGFS struct {
+	JournalSizeMB            int    `json:"journal_size_mb"`
+	JournalSizeDescription   string `json:"journal_size_description"`
+	ResourceGroupSizeMB      int    `json:"resource_group_size_mb"`
+	ResourceGroupDescription string `json:"resource_group_size_description"`
 }
 
 type orderedSystemProfile struct {
@@ -464,6 +475,9 @@ func NormalizeClusterJSON(root map[string]any) map[string]any {
 	}
 	pcsCluster := ensureMap(cfg, "pcsCluster")
 	normalizePCSClusterMap(pcsCluster)
+	gfs := ensureMap(cfg, "gfs")
+	journalSizeMB := normalizeGFSSize(gfs["journal_size_mb"], CubeModel.GFSDefaultJournalSizeMB)
+	resourceGroupSizeMB := normalizeGFSSize(gfs["resource_group_size_mb"], CubeModel.GFSDefaultResourceGroupSizeMB)
 
 	externalTimeserver := getString(cfg["external_timeserver"])
 	if externalTimeserver == "" {
@@ -478,11 +492,18 @@ func NormalizeClusterJSON(root map[string]any) map[string]any {
 		storageNetwork = getString(cfg["iscsi_storage"])
 	}
 	ordered := orderedClusterConfig{
-		Type:               getString(cfg["type"]),
-		BackupPath:         getString(cfg["backup_path"]),
-		CCVM:               orderedCCVM{IP: getString(ccvm["ip"])},
-		MngtNic:            orderedMngtNic{CIDR: getString(mngtNic["cidr"]), GW: getString(mngtNic["gw"]), DNS: getString(mngtNic["dns"])},
-		PCSCluster:         pcsCluster,
+		Type:       getString(cfg["type"]),
+		HostType:   getString(cfg["hostType"]),
+		BackupPath: getString(cfg["backup_path"]),
+		CCVM:       orderedCCVM{IP: getString(ccvm["ip"])},
+		MngtNic:    orderedMngtNic{CIDR: getString(mngtNic["cidr"]), GW: getString(mngtNic["gw"]), DNS: getString(mngtNic["dns"])},
+		PCSCluster: pcsCluster,
+		GFS: orderedGFS{
+			JournalSizeMB:            journalSizeMB,
+			JournalSizeDescription:   CubeModel.GFSJournalSizeDescription,
+			ResourceGroupSizeMB:      resourceGroupSizeMB,
+			ResourceGroupDescription: CubeModel.GFSResourceGroupDescription,
+		},
 		Hosts:              buildOrderedHosts(cfg),
 		ExternalTimeserver: externalTimeserver,
 		StorageNetwork:     normalizeStorageNetwork(storageNetwork),
@@ -492,6 +513,14 @@ func NormalizeClusterJSON(root map[string]any) map[string]any {
 	normalizeSystemProfile(root)
 	normalizeSecurity(root)
 	return root
+}
+
+func normalizeGFSSize(value any, fallback int) int {
+	normalized, err := strconv.Atoi(strings.TrimSpace(getString(value)))
+	if err != nil || normalized <= 0 {
+		return fallback
+	}
+	return normalized
 }
 
 func normalizeStorageNetwork(val any) string {
@@ -717,6 +746,15 @@ func setHosts(cfg map[string]any, hosts []map[string]any) {
 	cfg["hosts"] = raw
 }
 
+func renumberHostIndexes(hosts []map[string]any) {
+	for i, host := range hosts {
+		if host == nil {
+			continue
+		}
+		host["index"] = strconv.Itoa(i + 1)
+	}
+}
+
 func updatePCSCluster(cfg map[string]any, pcsList []string) {
 	if len(pcsList) == 0 {
 		return
@@ -864,6 +902,11 @@ func insert(clusterPath string, args Args) Result {
 
 	if args.Type != "" {
 		cfg["type"] = args.Type
+	}
+	if strings.EqualFold(args.HostType, "add") {
+		cfg["hostType"] = "add"
+	} else if strings.TrimSpace(args.HostType) != "" {
+		cfg["hostType"] = "new"
 	}
 
 	if args.CCVMMngtIP != "" {
@@ -1083,6 +1126,10 @@ func removeHost(clusterPath string, args Args) Result {
 		writePCSClusterValues(pcs, filteredPCS)
 
 		if isHCIClusterType(args.Type) {
+			targetIndex := getString(target["index"])
+			if targetIndex == "" {
+				targetIndex = strconv.Itoa(found + 1)
+			}
 			removeIPs := map[string]bool{
 				getString(target["ablecube"]):   true,
 				getString(target["scvmMngt"]):   true,
@@ -1091,11 +1138,13 @@ func removeHost(clusterPath string, args Args) Result {
 				getString(target["scvmCn"]):     true,
 			}
 			removeNames := map[string]bool{
-				getString(target["hostname"]):            true,
-				"scvm" + strconv.Itoa(found) + "-mngt":   true,
-				"ablecube" + strconv.Itoa(found) + "-pn": true,
-				"scvm" + strconv.Itoa(found):             true,
-				"scvm" + strconv.Itoa(found) + "-cn":     true,
+				getString(target["hostname"]):    true,
+				"scvm" + targetIndex + "-mngt":   true,
+				"pn-ablecube" + targetIndex:      true,
+				"ablecube" + targetIndex + "-pn": true,
+				"scvm" + targetIndex:             true,
+				"cn-scvm" + targetIndex:          true,
+				"scvm" + targetIndex + "-cn":     true,
 			}
 
 			if err := updateHostsFile(removeIPs, removeNames, nil); err != nil {
@@ -1103,6 +1152,7 @@ func removeHost(clusterPath string, args Args) Result {
 			}
 
 			hosts = append(hosts[:found], hosts[found+1:]...)
+			renumberHostIndexes(hosts)
 			setHosts(cfg, hosts)
 
 			if err := saveClusterJSON(clusterPath, root); err != nil {
@@ -1122,6 +1172,7 @@ func removeHost(clusterPath string, args Args) Result {
 				filtered = append(filtered, host)
 			}
 		}
+		renumberHostIndexes(filtered)
 		setHosts(cfg, filtered)
 
 		if err := saveClusterJSON(clusterPath, root); err != nil {
@@ -1268,6 +1319,7 @@ func changeHosts(args Args, cfg map[string]any) Result {
 		scvmIP := getString(host["scvm"])
 		scvmCnIP := getString(host["scvmCn"])
 		hostName := getString(host["hostname"])
+		scvmName := "scvm" + index
 
 		if strings.EqualFold(args.Type, "ablestack-vm") || strings.EqualFold(args.Type, "ablestack-standalone") {
 			removeNames := map[string]bool{
@@ -1309,17 +1361,22 @@ func changeHosts(args Args, cfg map[string]any) Result {
 		}
 		lines = filterHostsLines(lines, removeIPs, removeNames)
 
-		if hostname == hostName {
+		localAblecube := hostname == hostName
+		localSCVM := hostname == scvmName
+		if localAblecube {
 			lines = append(lines, formatHostsEntry(ablecubeIP, []string{hostName, "ablecube"}))
-			lines = append(lines, formatHostsEntry(scvmMngtIP, []string{"scvm" + index + "-mngt", "scvm-mngt"}))
-			lines = append(lines, formatHostsEntry(ablecubePnIP, []string{"pn-ablecube" + index, "pn-ablecube"}))
-			lines = append(lines, formatHostsEntry(scvmIP, []string{"scvm" + index, "scvm"}))
-			lines = append(lines, formatHostsEntry(scvmCnIP, []string{"cn-scvm" + index, "cn-scvm"}))
 		} else {
 			lines = append(lines, formatHostsEntry(ablecubeIP, []string{hostName}))
-			lines = append(lines, formatHostsEntry(scvmMngtIP, []string{"scvm" + index + "-mngt"}))
+		}
+		if localAblecube || localSCVM {
+			lines = append(lines, formatHostsEntry(scvmMngtIP, []string{scvmName + "-mngt", "scvm-mngt"}))
+			lines = append(lines, formatHostsEntry(ablecubePnIP, []string{"pn-ablecube" + index, "pn-ablecube"}))
+			lines = append(lines, formatHostsEntry(scvmIP, []string{scvmName, "scvm"}))
+			lines = append(lines, formatHostsEntry(scvmCnIP, []string{"cn-scvm" + index, "cn-scvm"}))
+		} else {
+			lines = append(lines, formatHostsEntry(scvmMngtIP, []string{scvmName + "-mngt"}))
 			lines = append(lines, formatHostsEntry(ablecubePnIP, []string{"pn-ablecube" + index}))
-			lines = append(lines, formatHostsEntry(scvmIP, []string{"scvm" + index}))
+			lines = append(lines, formatHostsEntry(scvmIP, []string{scvmName}))
 			lines = append(lines, formatHostsEntry(scvmCnIP, []string{"cn-scvm" + index}))
 		}
 	}
@@ -1557,7 +1614,7 @@ func buildTargetURL(target string) string {
 	}
 	port := os.Getenv("ABLESTACK_API_PORT")
 	if port == "" {
-		port = "8090"
+		port = "18090"
 	}
 	return fmt.Sprintf("%s://%s:%s", scheme, target, port)
 }

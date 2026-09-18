@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -25,6 +27,7 @@ const (
 var (
 	autoSSHScanMu      sync.Mutex
 	autoSSHScanLastRun time.Time
+	knownHostsMu       sync.Mutex
 )
 
 // init은 ssh scan 로그를 syslog로 보내도록 logger 출력을 교체한다.
@@ -165,7 +168,13 @@ func runSSHKeyscan(hosts []string, port int) ([]byte, error) {
 	}
 	args = append(args, hosts...)
 	cmd := exec.Command("ssh-keyscan", args...)
-	return cmd.CombinedOutput()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
+	if err != nil && stderr.Len() > 0 {
+		return output, fmt.Errorf("ssh-keyscan failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return output, err
 }
 
 // scanAndUpdateKnownHostsForHosts는 열린 SSH 포트가 있는 host만 골라 known_hosts를 갱신한다.
@@ -204,29 +213,42 @@ func scanAndUpdateKnownHostsForHosts(hosts []string, port int) (scanAttemptResul
 
 // updateKnownHosts는 기존 키를 제거한 뒤 새 ssh-keyscan 결과를 known_hosts에 append한다.
 func updateKnownHosts(hosts []string, output []byte, port int) error {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		home = os.Getenv("HOME")
-	}
-	if strings.TrimSpace(home) == "" {
-		return fmt.Errorf("home directory not found")
-	}
+	knownHostsMu.Lock()
+	defer knownHostsMu.Unlock()
 
-	sshDir := filepath.Join(home, ".ssh")
-	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+	knownHostsFile, err := resolveKnownHostsFile()
+	if err != nil {
 		return err
 	}
-	knownHostsFile := filepath.Join(sshDir, "known_hosts")
 	log.Printf("ssh-scan update known_hosts: path=%s hosts=%d port=%d", knownHostsFile, len(hosts), port)
+	removedLines, err := repairKnownHostsFile(knownHostsFile)
+	if err != nil {
+		return fmt.Errorf("repair known_hosts: %w", err)
+	}
+	if removedLines > 0 {
+		log.Printf("ssh-scan repaired known_hosts: removed_invalid_lines=%d path=%s", removedLines, knownHostsFile)
+	}
 
 	for _, host := range hosts {
-		_ = exec.Command("ssh-keygen", "-R", host, "-f", knownHostsFile).Run()
+		if removeOutput, err := exec.Command("ssh-keygen", "-R", host, "-f", knownHostsFile).CombinedOutput(); err != nil {
+			return fmt.Errorf("remove known_hosts entry for %s: %w: %s", host, err, strings.TrimSpace(string(removeOutput)))
+		}
 		if port != 22 {
-			_ = exec.Command("ssh-keygen", "-R", fmt.Sprintf("[%s]:%d", host, port), "-f", knownHostsFile).Run()
+			target := fmt.Sprintf("[%s]:%d", host, port)
+			if removeOutput, err := exec.Command("ssh-keygen", "-R", target, "-f", knownHostsFile).CombinedOutput(); err != nil {
+				return fmt.Errorf("remove known_hosts entry for %s: %w: %s", target, err, strings.TrimSpace(string(removeOutput)))
+			}
 		}
 	}
 
-	if len(bytes.TrimSpace(output)) == 0 {
+	validOutput, rejectedLines := sanitizeKnownHosts(output, false)
+	if rejectedLines > 0 {
+		log.Printf("ssh-scan rejected malformed keyscan output: rejected_lines=%d", rejectedLines)
+	}
+	if len(bytes.TrimSpace(validOutput)) == 0 {
+		if len(bytes.TrimSpace(output)) > 0 {
+			return fmt.Errorf("ssh-keyscan returned no valid host keys")
+		}
 		return nil
 	}
 	file, err := os.OpenFile(knownHostsFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -235,21 +257,132 @@ func updateKnownHosts(hosts []string, output []byte, port int) error {
 	}
 	defer file.Close()
 
-	if _, err := file.Write(output); err != nil {
+	if _, err := file.Write(validOutput); err != nil {
 		return err
 	}
-	if !bytes.HasSuffix(output, []byte("\n")) {
+	if !bytes.HasSuffix(validOutput, []byte("\n")) {
 		if _, err := file.Write([]byte("\n")); err != nil {
 			return err
 		}
 	}
-	log.Printf("ssh-scan update known_hosts: appended_lines=%d path=%s", countNonEmptyLines(output), knownHostsFile)
+	log.Printf("ssh-scan update known_hosts: appended_lines=%d path=%s", countNonEmptyLines(validOutput), knownHostsFile)
 	return nil
+}
+
+func resolveKnownHostsFile() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		home = os.Getenv("HOME")
+	}
+	if strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("home directory not found")
+	}
+
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(sshDir, "known_hosts"), nil
+}
+
+func repairDefaultKnownHostsFile() (int, error) {
+	knownHostsMu.Lock()
+	defer knownHostsMu.Unlock()
+
+	path, err := resolveKnownHostsFile()
+	if err != nil {
+		return 0, err
+	}
+	return repairKnownHostsFile(path)
+}
+
+func repairKnownHostsFile(path string) (int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return 0, err
+		}
+		raw = nil
+	}
+
+	valid, removed := sanitizeKnownHosts(raw, true)
+	if removed == 0 && err == nil {
+		return 0, nil
+	}
+	if len(valid) > 0 && !bytes.HasSuffix(valid, []byte("\n")) {
+		valid = append(valid, '\n')
+	}
+
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, ".known_hosts-*")
+	if err != nil {
+		return 0, err
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return 0, err
+	}
+	if _, err := temp.Write(valid); err != nil {
+		temp.Close()
+		return 0, err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return 0, err
+	}
+	if err := temp.Close(); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+func sanitizeKnownHosts(input []byte, preserveComments bool) ([]byte, int) {
+	var output bytes.Buffer
+	removed := 0
+	for _, rawLine := range bytes.Split(input, []byte("\n")) {
+		line := strings.TrimSpace(string(rawLine))
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			if preserveComments {
+				output.WriteString(line)
+				output.WriteByte('\n')
+			}
+			continue
+		}
+		if !isValidKnownHostsLine(line) {
+			removed++
+			continue
+		}
+		output.WriteString(line)
+		output.WriteByte('\n')
+	}
+	return output.Bytes(), removed
+}
+
+func isValidKnownHostsLine(line string) bool {
+	fields := strings.Fields(line)
+	keyIndex := 1
+	if len(fields) > 0 && strings.HasPrefix(fields[0], "@") {
+		keyIndex = 2
+	}
+	if len(fields) <= keyIndex+1 {
+		return false
+	}
+	_, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(strings.Join(fields[keyIndex:], " ")))
+	return err == nil && len(bytes.TrimSpace(rest)) == 0
 }
 
 // isPortOpen은 지정한 host:port에 TCP 연결이 가능한지 확인한다.
 func isPortOpen(host string, port int, timeout time.Duration) bool {
-	address := fmt.Sprintf("%s:%d", host, port)
+	address := net.JoinHostPort(host, strconv.Itoa(port))
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return false

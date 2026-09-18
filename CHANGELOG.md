@@ -2,7 +2,130 @@
 
 ABLESTACK API의 변경 이력은 이 파일에 기록한다. RPM 버전은 `VERSION` 파일을 기준으로 관리한다.
 
-## [0.1.4] - 2026-06-08
+## Unreleased
+
+### Changed
+
+- `clusterConfig.gfs`에 `mkfs.gfs2` journal/resource group 크기 설정을 추가했습니다. `journal_size_mb`는 기본 512MB(8~1024MB), `resource_group_size_mb`는 기본 1024MB(32~2048MB)이며 두 값 모두 2의 거듭제곱만 허용합니다. GFS 생성 시 각각 `-J`, `-r` 인자로 적용하고 cluster.json에는 설정 범위 설명을 함께 보존합니다.
+- 올인원 deploy Job을 제품별 실제 실행 흐름에 맞게 보강했습니다. VM/HCI Filesystem의 `storage_prepare`는 PCS 초기화만으로 완료 처리하지 않고 `init-pcs-cluster -> configure-stonith -> create-gfs -> set-alert`를 순차 실행하며, HCI Filesystem은 직전 `rbd_prepare`가 생성한 image를 `/dev/rbd/<pool>/<image>` 장치로 이어받습니다. GFS 전체 성공 후에만 `bootstrap.gfs_configure=true`를 반영합니다.
+- 올인원 deploy에 `monitoring_prepare` 단계를 추가해 CCVM bootstrap 완료 후 기존 Wall 최초 구성 API와 서비스 검증을 실행하고, 성공 후에만 `bootstrap.wall=true`를 반영합니다. 최초 `license_apply`는 아직 저장되지 않은 올인원 요청의 호스트 목록을 우선 사용하며, 잘못된 mode/step은 시작 전에 거부하고 queued/running Job이 있는 동안 중복 배포 Job 시작을 `409`로 차단합니다.
+- Apache CloudStack 4.22 공식 API 계약에 맞춰 `createPhysicalNetwork`의 속도 파라미터를 `networkspeed`로 교정했습니다. 호스트 제거는 `prepareHostForMaintenance` Job 완료 후 `listHosts.resourcestate=Maintenance`를 검증하고, 동기 `deleteHost`의 `success=true`를 확인하며 `forcedestroylocalstorage=false`를 명시해 로컬 스토리지의 강제 삭제를 방지합니다.
+- 제품별 비동기 호스트 제거 Job을 추가했습니다. 공통으로 대상 Host API Health를 확인하고 Mold `prepareHostForMaintenance` 비동기 Job 완료와 `listHosts`의 실제 `Maintenance` 상태를 확인한 뒤에만 `deleteHost`를 호출합니다. HCI는 Ceph drain/OSD 및 SCVM 제거, VM은 PCS/GFS 노드와 펜싱 장치 제거, HCI Filesystem은 두 흐름을 순서대로 수행한 뒤 전체 노드의 `cluster.json`·`/etc/hosts`와 CCVM Wall 모니터링 대상을 갱신합니다. 각 단계의 진행·성공·실패와 원본 실행 결과는 Job 조회 API에서 확인할 수 있습니다.
+- HCI 추가 호스트의 SCVM만 준비한 뒤 기존 첫 번째 SCVM의 Cephadm 공개키를 설치하고 `ceph orch host add`/검증으로 기존 Glue 클러스터에 조인하는 대상 지정 Job 흐름을 추가했습니다. 초기 Ceph bootstrap은 재실행하지 않습니다.
+- 클러스터 추가 작업의 `hostType=add`를 `cluster.json`에 보존해 신규 호스트의 SCVM 배포 화면이 기존 클러스터 조인 흐름을 선택할 수 있도록 했습니다.
+- 추가 호스트 프로파일을 기존 Ablecube·SCVM·CCVM 전체에 fan-out하고 신규 SCVM cloud-init에도 동일한 `cluster.json`과 `/etc/hosts`를 포함합니다. SCVM에서 파일을 재생성할 때 로컬 `scvm`, `scvm-mngt`, `cn-scvm` 별칭도 유지하도록 호스트명 판정을 보완했습니다.
+- 추가 SCVM 시작 후 API Health를 20초 간격으로 최대 5회 확인하고, 성공하면 고정 대기 없이 `prepare_local_scvm`과 기존 Glue 클러스터 호스트 등록을 순서대로 실행합니다. 신규 Ceph 호스트에는 별도 `_admin` 라벨을 추가하지 않습니다.
+- 신규 SCVM의 `node-exporter`, `process-exporter`, `glue-api.service`와 ipcorrector cron은 Health 확인 직후 `prepare_local_scvm`에서 활성화합니다.
+- CCVM bootstrap의 SCVM Crushmap 설정, Ablecube TPM agent 파일 배포, Pacemaker/Corosync 활성화에서 SSH/SCP를 제거했다. Host API가 `cluster.json`의 동적 대상에 내부 토큰 API를 호출하고 각 SCVM/Ablecube API가 작업을 로컬 실행한 뒤 CCVM 내부 bootstrap을 진행하며, 대상별 결과를 bootstrap 응답과 deploy job에 기록한다.
+- 상태 수집 컨트롤러를 취소 가능한 ticker 기반 스케줄러로 변경하고, 이전 실행이 끝나지 않은 handler의 중복 실행을 방지하며 종료 시 실행 중 작업을 기다리도록 개선했다. 오류 목록의 추가·조회·초기화도 동시성 안전하게 처리한다.
+- RPM `%check`가 일부 package만 검사하던 방식을 `go vet ./...`와 `go test ./...` 전체 검사로 강화했다.
+- SSH 포트 확인의 host/port 결합을 안전하게 처리하고, 운영 환경 정책에 맞춰 key scan을 IPv4 전용으로 제한했다.
+- 올인원 deploy step의 원격 오류 문구를 동적 format 문자열로 해석하지 않도록 변경해 vet 실패와 `%` 포함 오류의 잘못된 출력을 방지했다.
+- GFS 마운트 상태 조회의 장치 정보를 경로 모드별로 분리해 멀티패스 환경에서는 `/dev/mapper/mpath*`만, 싱글패스 환경에서는 `/dev/sd*` 물리 장치만 반환하도록 변경했습니다.
+- 마운트된 GFS 디스크 상태 조회에서 동일 마운트에 여러 `disk_id`가 합쳐지더라도 확장·삭제 화면에는 정렬된 대표 UUID 하나만 반환하도록 변경했습니다.
+- 전체 디스크 상세 조회(`GET /cube/disk?action=detail`)의 멀티패스 목록을 `multipath -ll` 결과 기준으로 반환하고, 멀티패스가 없는 환경은 `lsblk`의 실제 디스크를 반환하도록 변경했습니다. 두 방식 모두 `/`, `/boot`, `/boot/efi`, swap이 포함된 OS 디스크는 제외합니다.
+- GFS/CLVM 디스크 구성 payload는 표시용 `/dev/mapper/*` 또는 `/dev/sdX` 대신 `/dev/disk/by-id/*` 안정 경로만 사용하도록 변경했다. multipath는 `dm-uuid-mpath-*`, single path는 `wwn-*`, `scsi-*`, `nvme-*`, `ata-*` 순으로 선택하고 안정 경로가 없는 장치는 후보에서 제외하며, 화면과 CLVM 응답에서는 WWN 컬럼을 제거하고 UUID만 사용한다.
+- GFS/CLVM 디스크 목록에 정규화된 UUID와 경로 모드를 추가했다. multipath는 `DM_UUID`/by-id에서 `mpath-` 접두사를 제거한 WWID를, single path는 `lsblk WWN`을 사용하며 서비스 상태가 아닌 실제 블록 토폴로지로 구분한다.
+- GFS 디스크 인벤토리에서 multipath 장치 하위에 파티션이 있으면 사용 중으로 표시하고, GFS 초기 구성·추가·확장 및 CLVM 추가 화면에서 해당 장치를 선택할 수 없도록 변경했다.
+- CCVM의 매일 01:00 자동 스냅샷과 cloud DB dump를 API 프로세스 내부 Go 스케줄러로 통합했다. 기존 `create_ccvm_snap.py`, `backup_mysql.py` root cron은 API 시작 및 PCS setup 시 제거하며, 사용자가 DB Dump API로 만든 `RegularBackup`/`DeleteOldBackup` 일정은 유지한다.
+- Linux 계정 비밀번호 검증에서 Python `crypt`/`spwd` subprocess를 제거했다. API가 `/etc/shadow`를 직접 읽고 EL9 기본 yescrypt와 SHA-512, SHA-256, bcrypt, MD5 crypt 해시를 Go에서 검증한다.
+- 호출되지 않던 CCVM lifecycle Python script 실행·응답 파싱 helper를 제거했다.
+- 보안 패치의 Host·SCVM·CCVM 원격 실행을 SSH에서 내부 토큰 기반 `/cube/security/patch` API fan-out으로 변경했다. 각 대상 API가 역할별 로컬 `security_patch.sh`를 실행하며 응답에 transport, API URL, HTTP 상태와 스크립트 결과를 포함한다. 후속 `security_patch.status` 전파는 기존 Python `ablestackJson.py` 호출을 제거하고 `/cube/system/config` API로 `cluster.json`의 `systemProfile.security_patch.status=true`를 반영한다.
+- CCVM Wall Python 실행 시 `ABLESTACK_CLUSTER_JSON=/etc/ablestack/properties/cluster.json`을 전달해 SCVM·CCVM의 API 표준 cluster.json 경로를 사용하도록 통일했다.
+- CCVM lifecycle에 재배포 전용 `initialize` action을 추가했다. `cloudcenter_res`가 존재할 때만 제거하고 `/mnt/glue-gfs/ccvm*` 파일만 정리하며, 리소스 또는 PCS가 아직 없으면 정상적으로 다음 구성 단계로 진행한다.
+- API 서버 기본 포트를 `18090`으로 변경하고 listen 포트와 노드 간 호출 포트를 `ABLESTACK_API_PORT`로 통일했다. RPM 빌드 시 `API_PORT`/`api_port`로 포트를 지정할 수 있으며, 설치 후 `configure-api-port.sh`로 환경 갱신, 새 방화벽 포트 추가, 서비스 재시작 및 listen 확인, 기존 방화벽 포트 제거를 안전하게 처리한다. 실패 시 기존 포트 설정으로 복구한다.
+- CCVM Wall 이미지가 제공하는 DB/Python 런타임 때문에 Host·SCVM·CCVM 공통 API RPM 설치가 차단되지 않도록 `sqlite`와 `mariadb`를 hard dependency에서 제외하고 역할별 런타임 요구사항으로 정리했다.
+- `/cube/ccvm/monitoring/config`를 최초 구성(`configure`)과 수집 대상 재갱신(`update`)으로 분리했다. 최초 구성은 CCVM 기준 대상 연결 확인, Netdive 설정, 서비스 정지, Wall/Prometheus/Loki 설정, 서비스 enable/start, SMTP 설정, 전체 서비스 active/enabled 검증을 순서대로 수행하며 모든 단계 성공 후에만 전체 호스트의 `bootstrap.wall=true`를 반영한다.
+- Wall 모니터링 구성을 CCVM 이미지에서 검증된 기존 `host_ping_test.py`, `config_netdive.py`, `start_services.py`, `config_wall.py`, `config_loki.py`, `config_smtp.py` 실행 흐름으로 복원했다. API는 스크립트별 JSON 결과와 Prometheus, exporter, Grafana, Netdive, Loki, Promtail의 실제 active/enabled 상태를 검증하고 모든 단계 성공 후에만 완료 상태를 반영한다.
+- Python과 중복되던 Go Wall YAML/INI/DB 구성 및 원격 SSH/SCP 구현을 제거하고, API의 `wallservice`를 Python 실행·JSON 결과 파싱·로컬 서비스 상태 검증 역할로 축소했다.
+- 모니터링 Python에 전달하는 `--cube`, `--ccvm`, `--scvm` 주소는 요청 body로 덮어쓰지 않고 `cluster.json`의 Host, CCVM, SCVM 관리 IP에서만 구성하도록 고정했다.
+- CCVM Wall Python 단계 timeout을 기존 2분에서 10분으로 분리해 Netdive의 다중 Cube SCP/SSH 재시도를 허용하고, timeout 응답에 CCVM에서 Cube로의 passwordless SSH/SCP 점검 원인을 표시하도록 개선했다.
+- GFS 리소스 상태 응답에 `glue-gfs_res` LVM 활성화와 `glue-gfs` Filesystem clone의 노드별 상태를 묶은 `gfs_mount_resources`를 추가하고 기존 `glue_gfs_resources` 응답은 호환용으로 유지했다.
+- CCVM `setup`, `reset`, `start`, `restart` 성공 직후 `ccvm`, `ccvm-mngt`, CCVM 관리 IP의 SSH host key를 즉시 다시 수집하도록 연결했다. 스캔 전에 손상된 `known_hosts` 행을 원자적으로 복구해 기존 키 제거가 실패하지 않도록 했다.
+- 모니터링 구성 응답에 단계별 실행 결과, 서비스별 active/enabled 상태와 system profile 반영 결과를 추가하고 명령별 표준 출력과 오류 원인을 실패 응답에 포함하도록 변경했다.
+- 모니터링 대상 구성 API가 제품 타입에 따라 HCI 계열에서만 SCVM을 포함하고, ABLESTACK-Standalone에서는 첫 번째 Ablecube 한 대와 CCVM만 구성하도록 대상 생성을 정리했습니다.
+
+### Added
+
+- Mold bootstrap의 `add_host` 앞에 `sync_host_ssh_trust` job step을 추가했다. CCVM의 CloudStack management 공개키를 읽어 `cluster.json`의 모든 `hosts[].ablecube`에 `cloud@ccvm` 식별자로 멱등 등록하고, 같은 관리 개인키로 호스트별 SSH 접속을 검증한 결과를 job에 기록한다.
+- 호스트의 다른 인증키를 유지하면서 `cloud@ccvm` 항목만 등록·조회·제거하는 `POST /cube/ssh/trust` API를 추가했다.
+- 클라우드센터의 Wall 모니터링을 최초 구성하거나 수집 대상을 재갱신할 수 있도록 `POST /cube/ccvm/monitoring/config` API를 추가했다. Host API가 요청을 CCVM 내부 API로 전달하고 실행 결과를 단계별로 반환한다.
+
+## [0.1.5] - 2026-07-02
+
+### Added
+
+- Health Check와 cloud-init 생성 후 CCVM 생성과 시작을 분리할 수 있도록 비활성 PCS 리소스를 생성하는 `/cube/ccvm/create` API를 추가했다.
+- `/cube/security/evidence` 생성/최신 조회 API와 `/cube/security/evidence/download` ZIP 다운로드 API를 추가하고 U-01~U-67 수집 카탈로그, TXT/XLSX/PPTX 패키지 생성기를 API RPM에 포함했다.
+- GFS Manage API에 `configure-stonith` action을 추가해 host 수에 따라 펜싱 장치를 동적으로 생성·갱신하고 대상별 결과를 반환하도록 했다.
+- CCVM 전용 `/api/v1/mold` namespace를 추가하고, `cluster.json`의 `clusterConfig.ccvm.ip` 값을 기준으로 Mold `/client/api` endpoint를 동적으로 계산하도록 했다.
+- Mold 초기 자동화의 선행 단계로 `/mold/session`에서 login sessionkey를 발급하고, `/mold/capabilities`에서 login 후 `listCapabilities`를 호출할 수 있도록 했다.
+- Mold 인프라 자동화 입력값을 검증하고 `createZone -> createPhysicalNetwork -> createPod -> addCluster -> addHost -> createStoragePool -> addSecondaryStorage -> updateZone` 실행 순서와 각 list 검증 API를 반환하는 `/mold/bootstrap/plan` API를 추가했다.
+- Mold bootstrap 실행 결과가 zone, physical network, pod, cluster, host, primary/secondary storage, system VM 단위로 성공/검증 상태와 Mold 에러 원문을 반환할 수 있도록 단계별 결과 모델을 추가했다.
+- Mold bootstrap을 비동기 job으로 시작하는 `/mold/bootstrap`과 진행/최종 결과를 조회하는 `/mold/jobs`, `/mold/jobs/{job_id}` API 골격을 추가했다.
+- Mold bootstrap job step 실행기를 추가해 `createZone`, `createPhysicalNetwork`, `createPod`, `addCluster`, `addHost`, `createStoragePool`, `addSecondaryStorage`, `createSecondaryStagingStore`, `updateZone`, `listSystemVms`를 순차 실행하고 각 단계마다 대응되는 `list*` API로 실제 반영 여부를 검증하도록 했다.
+- Mold create/add/update 응답이 `jobid`를 반환하면 `queryAsyncJobResult`로 async job 완료를 polling하고, 실패 시 원래 step command와 Mold `errorcode/errortext`를 job 결과에 남기도록 했다.
+- Mold bootstrap 기본 리소스 이름을 `Zone`, `Pod`, `Cluster`처럼 첫 글자만 대문자인 형식으로 정규화하도록 했다.
+- Mold API가 `{command}response.errorcode/errortext` 형태로 반환하는 중첩 에러를 실패로 감지하도록 보완했다.
+- Mold bootstrap job의 시작, 단계별 실행/성공/실패, 최종 완료 상태를 job ID와 command, 검증 command, 소요 시간, 오류 정보와 함께 `/var/log/ablestack/job.log`에 기록하도록 했다.
+- Mold API readiness 확인에서 인증 전 `listCapabilities`가 CloudStack 형식의 HTTP 401 오류를 반환하면 endpoint가 응답 가능한 상태로 판단하고 `login_admin` 단계로 진행하도록 했다.
+- Mold bootstrap이 `clusterConfig.type`에 따라 HCI는 `Primary Storage(RBD)`/ABLESTACK Glue Block, VM·Standalone·HCI Filesystem은 `Primary Storage(Glue)`/DefaultPrimary SharedMountPoint를 자동 구성하도록 했다.
+- HCI Glue Block의 monitor를 `clusterConfig.hosts[].index` 기준 `scvm1,scvm2,...`로 만들고, 첫 번째 접근 가능한 host에서 `ceph auth get-key client.admin`으로 secret을 조회해 RBD URL과 `krbdPath=/dev/rbd`를 구성하도록 했다.
+- Mold bootstrap의 host URL을 `clusterConfig.hosts[].ablecube`, secondary storage URL을 `clusterConfig.ccvm.ip`, physical network VLAN을 `1-1`로 자동 구성하도록 했다.
+- CCVM cloud-init에 CloudStack management용 SSH 키를 `/var/cloudstack/management/.ssh/id_rsa(.pub)` 경로로 함께 배치해 passwordless host 연결에 사용할 수 있도록 했다.
+- Mold Zone bootstrap에 Management, Guest, Public Traffic Type을 추가하고 각 `kvmnetworklabel`을 `bridge0`로 고정했으며, 기존 Traffic Type의 label이 다르면 `updateTrafficType`으로 교정하도록 했다.
+- Traffic Type 구성 후 Physical Network를 `Enabled`로 전환하고 VirtualRouter/VpcVirtualRouter element와 Network Service Provider를 자동 활성화하도록 했다.
+- Pod과 별도로 Public IP gateway/netmask/start/end를 입력받아 VLAN 없이 `createVlanIpRange(forvirtualnetwork=true)`로 생성하고 `listVlanIpRanges`로 검증하도록 했다.
+- Mold 4.21 Zone Wizard 흐름에 맞춰 Secondary Storage 생성 command를 `addSecondaryStorage`에서 `addImageStore(provider=NFS)`로 변경하고 Physical Network 속도 파라미터를 `speed`로 교정했다.
+
+### Changed
+
+- CCVM bootstrap 실행 경로를 PCS Started 호스트의 QEMU Guest Agent `guest-exec` 방식에서 `clusterConfig.ccvm.ip`의 CCVM API 직접 호출 방식으로 변경했습니다. CCVM API가 `/root/bootstrap.sh`를 로컬 실행하므로 호스트별 QGA command 허용 설정에 의존하지 않습니다.
+- 상태 카드 polling 시작 조건을 실제 구성 완료 시점에 맞췄다. HCI 계열은 SCVM 실행 후 스토리지 VM, SCVM bootstrap 후 스토리지 클러스터, CCVM 실행 후 클라우드 VM·클라우드 클러스터 조회를 활성화하며, ABLESTACK-VM은 GFS 구성 후 클라우드 클러스터, CCVM 실행 후 클라우드 VM 조회를 활성화한다.
+- `/cube/deploy/status` 응답에 상태 카드별 `polling.enabled`와 비활성 사유를 추가하고, 클러스터 구성·SCVM bootstrap·GFS 구성·CCVM 실행·CCVM bootstrap 완료 여부에 따라 개별 상태 API 호출 가능 여부가 자동 전환되도록 변경했다.
+- `ablestack-vm` 배포 상태 판정은 CCVM 실행과 bootstrap 완료를 확인한 뒤 CloudCenter PCS/resource 상태를 조회하도록 순서를 교정했다.
+- CCVM 라이선스 등록 요청에 `wait_for_ready` 옵션을 추가해 가상머신 시작 후 30초 간격으로 최대 6회 PCS `cloudcenter_res` Started 상태를 확인한 뒤 라이선스를 전달하도록 변경했다. Standalone은 로컬 libvirt CCVM running 상태를 사용한다. 단독 Cloud VM 구성은 라이선스 등록까지만 수행하고, CCVM bootstrap 상세 설정과 `bootstrap.ccvm=true` 반영은 별도의 클라우드센터 구성 단계에서 수행한다.
+- CCVM cloud-init이 8090/tcp 방화벽 규칙과 `ablestack-api.service` 활성화를 보장하도록 보완하고, 라이선스 등록 전 PCS/libvirt readiness 시도별 결과를 `api.log`에 기록하도록 변경했다.
+- 라이선스 fan-out의 로컬 파일 읽기, 대상별 전송 시작·완료, 원격 응답과 CCVM `/cube/license` 수신·처리 결과를 민감한 라이선스 내용 없이 `api.log`에 기록하도록 보완했다.
+- PCS CCVM start가 명령 실행 호스트의 로컬 `virsh domid`를 최대 25분 기다리던 문제를 수정하고, 클러스터 전체 `cloudcenter_res`가 어느 노드에서든 Started인지 확인한 즉시 반환해 후속 라이선스 등록 API가 실행되도록 변경했다.
+- 개별 CCVM 배포 흐름을 제품 타입별로 분리해 HCI 계열은 RBD 이미지와 PN 대상 XML 배포를, ABLESTACK-VM은 GFS의 `ccvm.qcow2`와 관리망 Host 대상 XML 배포를 사용하도록 변경했다.
+- ABLESTACK-VM CCVM 시작 시 `/mnt/glue-gfs` 마운트를 확인하고 공유 `ccvm.xml`과 `ccvm.qcow2`를 준비한 뒤 PCS 리소스를 생성하도록 변경했다.
+- CCVM lifecycle `start`는 PCS 리소스 enable 이후 실제 CCVM domain이 실행 상태가 될 때까지 확인한 뒤 완료하도록 변경했다.
+- 펜싱 장치의 `pcmk_reboot_action`과 PCS `stonith-action`을 `reboot`로 설정하도록 변경했다.
+- 보안 패치 실행 시 ablecube는 API RPM에 포함된 최신 호스트 스크립트를, ccvm/scvm은 cloud-init으로 배포된 `/usr/local/sbin/security_patch.sh`를 사용하도록 대상별 실행 경로를 분리하고 응답에 `targetKind`, `scriptPath`를 포함했다.
+- 보안 증적 PPTX에 예외처리 사유를 표시하고, 과도하게 긴 명령 결과는 최대 2페이지로 요약한 뒤 전체 결과를 TXT에서 확인하도록 안내하며 긴 제목 크기를 자동 조절하도록 변경했다.
+- 보안 증적 U-01, U-27, U-42, U-66, U-67 점검 명령과 예외 판정을 Cockpit 화면의 최신 점검 기준에 맞췄다.
+- HCI Filesystem 올인원 배포에 `rbd_prepare` Job 단계를 추가해 RBD image 생성과 전체 ablecube의 `/etc/ceph/rbdmap` 반영을 `storage_prepare`보다 먼저 실행하고 단계별 생성 image 및 host 적용 결과를 반환하도록 했다.
+- 기존 클라이언트가 `only`에 `storage_prepare`만 지정하더라도 `rbd` payload가 있으면 `rbd_prepare`를 자동으로 선행 삽입하도록 했다.
+- GFS `init-pcs-cluster`가 전체 ablecube의 LVM lock 설정, pcsd 활성화, hacluster 비밀번호 설정, `pcs host auth`, `pcs cluster setup --start`, `pcs cluster enable --all`, cluster status 검증을 순서대로 수행하도록 보완했다.
+- GFS `init-pcs-cluster`의 고정 PCS 클러스터 이름을 `cloudcenter_cluster`로 통일했다.
+- GFS 구성에 `create-gfs` action을 추가해 locking clone 준비 상태를 polling한 뒤 디스크 파티션, shared VG/LV, 호스트 수보다 journal이 1개 많은 GFS2 파일시스템, LVM/Filesystem clone 리소스와 제약조건을 생성하도록 했다.
+- STONITH 구성 중 `glue-dlm`, `glue-lvmlockd`, `glue-locking-clone` 생성 오류를 무시하지 않고 호출자에게 반환하도록 변경했다.
+- `create-gfs`가 locking 리소스 생성 직후 진행하지 않도록 최소 25초 안정화 시간과 전체 노드 연속 2회 Started 확인을 추가했다.
+- GFS 마법사가 최종 완료 상태를 기록할 수 있도록 기존 `gfs-configure` System Config fan-out API를 React 완료 흐름에 연결했다.
+- `configure-stonith`는 GFS용 PCS cluster가 준비되지 않았으면 실행하지 않고 `init-pcs-cluster` 선행 필요 오류를 반환하도록 변경했다.
+- System Config API에 `gfs-configure` action을 추가해 `bootstrap.gfs_configure` 완료 상태를 내부 토큰 기반 API로 전체 ablecube에 전파하도록 했다.
+- API가 배포하는 `security_patch.sh`에 Cockpit의 firewalld 상태 보장, U-34/U-36/U-46/U-48 조치, U-62 Banner 및 관련 파일 권한 변경을 동기화했다.
+- SCVM bootstrap을 모든 host API의 QGA 기반 로컬 준비 후 index가 가장 낮은 master SCVM에서 Ceph bootstrap을 수행하는 단계형 흐름으로 변경하고, 단계별 응답에 `action`을 추가했다.
+- `scvm_bootstrap.sh`의 직접 SSH/SCP를 제거하고 SCVM별 서비스 설정은 로컬 `prepare`, Ceph host 등록·설정/keyring 배포는 Cephadm orchestrator가 담당하도록 변경했다.
+- master가 생성한 Cephadm 공개키를 QGA 실행 결과로 읽어 각 SCVM의 `authorized_keys`에 로컬 설치한 뒤 host 등록을 수행하며, Cephadm 개인키는 master 밖으로 전달하지 않도록 했다.
+- `TypeHosts`가 내부 lock을 값으로 복사하지 않도록 host snapshot의 적용 인자와 생성 반환값을 포인터 방식으로 변경했다.
+- `multipath_sync.sh`에서 직접 SSH/SCP로 각 호스트를 제어하던 흐름을 제거하고, `/cube/multipath/sync` API를 호출하는 로컬 wrapper 방식으로 변경했다.
+
+### Fixed
+
+- GFS 기존 LUN 확장 전에 모든 ablecube에서 SCSI 경로를 rescan하고 `multipathd resize map`을 실행하도록 연결했다. multipath map 크기 반영 후 파티션, PV, LV, GFS2 순서로 확장하며 SCSI·multipath·parted 단계 오류를 더 이상 무시하지 않는다.
+- GFS 디스크 확장 시 숫자로 끝나는 multipath alias 또는 map 자체를 PV로 사용하는 구성에서 파티션 번호 `1`을 중복 추가해 `mpathb11` 같은 잘못된 경로로 `pvresize`하던 문제를 수정했다. `lsblk`에서 확인한 LV의 실제 직계 부모 PV 경로를 그대로 사용한다.
+- GFS 디스크 삭제 시 VG/LV 제거 전에 실제 multipath 디스크와 PV 파티션 경로를 수집하고, `pvremove` 후 `parted rm 1`까지 완료하도록 수정했다. 화면도 삭제 요청에 물리 path 대신 multipath 경로를 우선 전달하며 PV 또는 파티션 삭제 실패를 성공으로 무시하지 않는다.
+- GFS 생성 전 PCS 준비 상태는 `glue-locking-clone`, `glue-gfs-clone`, `glue-gfs_res-clone` 구간의 `Stopped`만 검사하도록 수정했다. fence 상태, 다른 리소스의 Failed Resource Actions 및 Started 노드 수는 판정에서 제외한다.
+- 모니터링 구성 API의 `configure` action을 Wall Python이 허용하는 `config` positional action으로 변환하지 않아 `invalid choice: configure`로 실패하던 문제를 수정했다.
+- `ssh-keyscan`의 stderr 오류 문구가 `/root/.ssh/known_hosts`에 섞여 파일 형식이 손상되던 문제를 수정했다. 갱신 전에 기존 파일의 잘못된 행을 제거하고, 유효한 OpenSSH host key만 저장하며, 동시 갱신과 `ssh-keygen -R` 실패를 명시적으로 처리한다.
+- SSH 포트 전용 변경(`port_change=true`) 시 `PermitRootLogin` 정책까지 덮어쓰던 문제를 수정했다.
+- Cockpit의 로컬 `ablestack.json`만 갱신하던 GFS 완료 상태가 호스트별로 달라질 수 있는 문제를 API 전체 fan-out 흐름으로 수정했다.
+- 호스트 제거 시 남은 `clusterConfig.hosts[]`의 `index` 값을 1부터 다시 부여하도록 수정했다.
+- HCI 계열 호스트 제거 시 `/etc/hosts`의 SCVM/PN/CN alias 정리 기준을 삭제 대상 host의 기존 `index` 값으로 맞췄다.
+
+## [0.1.4] - 2026-06-19
 
 ### Added
 
